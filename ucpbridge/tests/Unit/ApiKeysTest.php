@@ -67,4 +67,14 @@ final class ApiKeysTest extends TestCase
         $this->assertMatchesRegularExpression('/^ucpk_[0-9a-f]{48}$/', $k);
         $this->assertNotSame($k, UcpBridgeApiKeys::generate());
     }
+
+    public function testInstallationNeuveUneSeulePlateforme(): void
+    {
+        $k = UcpBridgeApiKeys::initial('2026-10-22 10:00:00');
+        $this->assertSame(['default'], array_keys($k));
+        $this->assertMatchesRegularExpression('/^ucpk_[0-9a-f]{48}$/', $k['default']['key']);
+        $this->assertSame('default', UcpBridgeApiKeys::match($k, $k['default']['key']));
+        $this->assertSame('{}', UcpBridgeApiKeys::encode([]));
+        $this->assertSame($k, json_decode(UcpBridgeApiKeys::encode($k), true));
+    }
 }

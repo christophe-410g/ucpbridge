@@ -74,6 +74,18 @@ class UcpBridgeApiKeys
         return [self::DEFAULT_ID => ['label' => self::DEFAULT_LABEL, 'key' => $legacy, 'date_add' => (string) $now]] + $keys;
     }
 
+    /** Clés d'une installation neuve : la seule plateforme par défaut, avec une clé générée. */
+    public static function initial($now)
+    {
+        return [self::DEFAULT_ID => ['label' => self::DEFAULT_LABEL, 'key' => self::generate(), 'date_add' => (string) $now]];
+    }
+
+    /** Valeur stockée en configuration (objet JSON, même vide). */
+    public static function encode(array $keys)
+    {
+        return json_encode((object) $keys, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
     /* ------------------------------ Configuration de la boutique ------------------------------ */
 
     public static function all()
@@ -93,7 +105,7 @@ class UcpBridgeApiKeys
 
     private static function save(array $keys)
     {
-        return Configuration::updateValue(self::CONFIG, json_encode((object) $keys, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        return Configuration::updateValue(self::CONFIG, self::encode($keys));
     }
 
     /** Plateforme authentifiée par la clé présentée, ou null. */
