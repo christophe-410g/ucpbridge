@@ -106,8 +106,8 @@ class Ucpbridge extends PaymentModule
     public function install()
     {
         if (version_compare(PHP_VERSION, self::PHP_MIN, '<')) {
-            $this->_errors[] = self::DISPLAY_NAME . ' exige PHP ' . self::PHP_MIN . ' ou plus récent (PHP ' . PHP_VERSION
-                . ' sur ce serveur). Mettre PHP à jour avant d\'installer le module.';
+            $this->_errors[] = UcpBridgeI18n::admin('%name% requires PHP %min% or later (PHP %current% on this server). Update PHP before installing the module.',
+                ['%name%' => self::DISPLAY_NAME, '%min%' => self::PHP_MIN, '%current%' => PHP_VERSION]);
 
             return false;
         }

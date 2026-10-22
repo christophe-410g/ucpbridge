@@ -11,6 +11,10 @@
         <source>%days% d</source>
         <target>%days% d</target>
       </trans-unit>
+      <trans-unit id="409e8cbcb267346361986e57f023ff0f">
+        <source>%name% requires PHP %min% or later (PHP %current% on this server). Update PHP before installing the module.</source>
+        <target>%name% requires PHP %min% or later (PHP %current% on this server). Update PHP before installing the module.</target>
+      </trans-unit>
       <trans-unit id="c4cdddc44c30923223e0b3d131ff91b6">
         <source>%name%: registration of payment adapters</source>
         <target>%name%: registration of payment adapters</target>

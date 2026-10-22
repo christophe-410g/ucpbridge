@@ -65,7 +65,7 @@ Nouveautés
   (chaque fonction de la configuration depuis le navigateur).
 - Traductions (#15) : toutes les chaînes destinées à un humain passent par le traducteur de PrestaShop (nouveau
   système, `isUsingNewTranslationSystem()`), textes sources en anglais, français et anglais fournis
-  (`translations/fr-FR/`, `translations/en-US/`, 341 chaînes : 155 `Modules.Ucpbridge.Admin`, 57
+  (`translations/fr-FR/`, `translations/en-US/`, 342 chaînes : 156 `Modules.Ucpbridge.Admin`, 57
   `Modules.Ucpbridge.Shop`, 129 `Modules.Ucpbridge.Api`). Nouvelle classe `UcpBridgeI18n` (texte source rendu tel quel
   hors PrestaShop, pour les tests unitaires). Back-office dans la langue de l'employé ; pages du module (`html lang`),
   API et MCP (descriptions des outils, instructions, messages) dans celle de la boutique ou du visiteur ; e-mail de
