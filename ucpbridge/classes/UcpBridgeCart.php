@@ -14,20 +14,11 @@ if (!defined('_PS_VERSION_')) {
 class UcpBridgeCart
 {
     const TTL = 86400;
-    /**
-     * Statuts internes qui ne bougent plus (ou seulement par le détenteur de la réservation) :
-     * handed_off (lien de reprise ouvert, la session a quitté l'API) et failed (débit puis commande impossible,
-     * remboursement tenté) sont exposés à l'agent comme « canceled », avec un message explicite.
-     */
-    const LOCKED = ['complete_in_progress', 'completed', 'canceled', 'handed_off', 'failed', 'updating', 'reconciling'];
-    const TERMINAL = ['completed', 'canceled', 'handed_off', 'failed'];
-    /**
-     * Réservations en cours : complete_in_progress (finalisation), updating (mise à jour du panier PrestaShop, posée
-     * AVANT toute modification), reconciling (rapprochement d'une session bloquée). Une seule à la fois par session.
-     */
-    const BUSY = ['complete_in_progress', 'updating', 'reconciling'];
-    /** Statuts d'une session de caisse modifiable par update_checkout. */
-    const EDITABLE = ['incomplete', 'ready_for_complete', 'requires_escalation'];
+    /** Statuts : voir UcpBridgeSessionStore (constantes reprises ici pour les appelants existants). */
+    const LOCKED = UcpBridgeSessionStore::LOCKED;
+    const TERMINAL = UcpBridgeSessionStore::TERMINAL;
+    const BUSY = UcpBridgeSessionStore::BUSY;
+    const EDITABLE = UcpBridgeSessionStore::EDITABLE;
 
     /** @var Context */
     private $context;
@@ -35,12 +26,18 @@ class UcpBridgeCart
     private $module;
     /** @var UcpBridgeCatalog */
     private $catalog;
+    /** @var UcpBridgeCaller */
+    private $caller;
+    /** @var UcpBridgeSessionStore */
+    private $store;
 
     public function __construct(Context $context, Ucpbridge $module)
     {
         $this->context = $context;
         $this->module = $module;
         $this->catalog = new UcpBridgeCatalog($context);
+        $this->caller = new UcpBridgeCaller();
+        $this->store = new UcpBridgeSessionStore($this->caller);
     }
 
     public function catalog()
@@ -56,77 +53,48 @@ class UcpBridgeCart
         return UcpBridgePaymentRegistry::get()->handlers();
     }
 
-    /* ====================== Client rattaché (identity linking) ====================== */
-
-    /** @var int client PrestaShop authentifié par jeton OAuth (0 = invité) */
-    private $idUser = 0;
+    /* ====================== Appelant (identity linking, plateforme) ====================== */
 
     public function setUser($idCustomer)
     {
-        $this->idUser = (int) $idCustomer;
+        $this->caller->idUser = (int) $idCustomer;
     }
-
-    /** @var string en-tête UCP-Agent de l'appelant (consigné dans le journal de preuve) */
-    private $agent = '';
 
     public function setAgent($agent)
     {
-        $this->agent = substr(trim((string) $agent), 0, 512);
+        $this->caller->agent = substr(trim((string) $agent), 0, 512);
     }
-
-    /** @var string appelant propriétaire : « platform » (clé API) ou « user:{client_id}:{id_customer} » (jeton OAuth) */
-    private $owner = '';
 
     public function setCaller($owner)
     {
-        $this->owner = (string) $owner;
+        $this->caller->owner = (string) $owner;
     }
 
-    /**
-     * Cloisonnement strict : un panier, une session ou une commande n'est lisible et modifiable que par l'appelant
-     * qui l'a créé (même plateforme, ou même client OAuth et même client final). Aucune ressource « ouverte à tous ».
-     */
+    /** Cloisonnement strict par appelant (voir UcpBridgeCaller::owns). */
     public function ownedByCaller(array $s)
     {
-        return '' !== $this->owner && hash_equals((string) ($s['owner'] ?? ''), $this->owner);
+        return $this->caller->owns($s);
     }
 
     public static function isTerminal($status)
     {
-        return in_array($status, self::TERMINAL, true);
+        return UcpBridgeSessionStore::isTerminal($status);
     }
 
     public static function isBusy($status)
     {
-        return in_array($status, self::BUSY, true);
+        return UcpBridgeSessionStore::isBusy($status);
     }
 
-    /** Statut UCP présenté à l'agent (les statuts internes deviennent des statuts de la spécification). */
     public static function exposedStatus($status)
     {
-        $map = ['handed_off' => 'canceled', 'failed' => 'canceled', 'updating' => 'incomplete', 'reconciling' => 'complete_in_progress'];
-
-        return $map[$status] ?? $status;
-    }
-
-    /**
-     * Réservation atomique : passe la session de l'un des statuts $from au statut $to (une seule ligne modifiée exigée).
-     * Optionnellement limitée aux sessions dont la dernière écriture est antérieure à $before (rapprochement).
-     */
-    private function reserve($id, array $from, $to, $before = null)
-    {
-        $db = Db::getInstance();
-        $db->update('ucpbridge_session', ['status' => pSQL($to), 'date_upd' => date('Y-m-d H:i:s')],
-            'id_session = \'' . pSQL($id) . '\' AND status IN (\'' . implode('\',\'', array_map('pSQL', $from)) . '\')'
-            . (null !== $before ? ' AND date_upd < \'' . pSQL($before) . '\'' : ''));
-
-        return 1 === (int) $db->Affected_Rows();
+        return UcpBridgeSessionStore::exposedStatus($status);
     }
 
     /** Rattache le panier au vrai client : identité, adresse enregistrée proposée par défaut. */
     private function attachUser(array &$s, Cart $cart)
     {
-        $c = new Customer($this->idUser);
+        $c = new Customer($this->caller->idUser);
         if (!Validate::isLoadedObject($c) || $c->is_guest || !$c->active) {
             return;
         }
@@ -162,69 +130,12 @@ class UcpBridgeCart
 
     public function load($id, $kind)
     {
-        $row = Db::getInstance()->getRow('SELECT * FROM `' . _DB_PREFIX_ . 'ucpbridge_session`
-            WHERE id_session = \'' . pSQL($id) . '\' AND kind = \'' . pSQL($kind) . '\'');
-        if (!$row) {
-            return null;
-        }
-        $row['payload'] = json_decode((string) $row['payload'], true) ?: [];
-        if (strtotime($row['expires_at']) < time() && !in_array($row['status'], self::LOCKED, true)) {
-            $row['status'] = 'canceled';
-            $this->save($row);
-        }
-
-        return $row;
+        return $this->store->load($id, $kind);
     }
 
-    /** Commande exposée par son identifiant opaque (ord_ + 24 caractères hexadécimaux), jamais par id_order. */
     public function loadByOrderRef($ref)
     {
-        if (!preg_match('/^ord_[a-f0-9]{24}$/', (string) $ref)) {
-            return null;
-        }
-        $id = Db::getInstance()->getValue('SELECT id_session FROM `' . _DB_PREFIX_ . 'ucpbridge_session`
-            WHERE kind = \'checkout\' AND id_order > 0 AND order_ref = \'' . pSQL($ref) . '\'');
-
-        return $id ? $this->load($id, 'checkout') : null;
-    }
-
-    /**
-     * Enregistre la session. Sans $from : ne réécrit jamais une session réservée ou terminée (statuts LOCKED).
-     * Avec $from : mise à jour conditionnelle (le statut en base doit être l'un de $from), atomique.
-     *
-     * @return bool true si la ligne a été créée ou modifiée
-     */
-    private function save(array $s, array $from = null)
-    {
-        $db = Db::getInstance();
-        $now = date('Y-m-d H:i:s');
-        $data = [
-            'id_cart' => (int) $s['id_cart'],
-            'id_order' => (int) ($s['id_order'] ?? 0),
-            'status' => pSQL($s['status']),
-            'payload' => pSQL(json_encode($s['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), true),
-            'expires_at' => pSQL($s['expires_at']),
-            'date_upd' => $now,
-        ];
-        if (!empty($s['order_ref'])) {
-            $data['order_ref'] = pSQL($s['order_ref']);
-        }
-        $id = pSQL($s['id_session']);
-        $exists = $db->getValue('SELECT 1 FROM `' . _DB_PREFIX_ . 'ucpbridge_session` WHERE id_session = \'' . $id . '\'');
-        if ($exists) {
-            $guard = null === $from
-                ? ' AND status NOT IN (\'' . implode('\',\'', self::LOCKED) . '\')'
-                : ' AND status IN (\'' . implode('\',\'', array_map('pSQL', $from)) . '\')';
-            $db->update('ucpbridge_session', $data, 'id_session = \'' . $id . '\'' . $guard);
-
-            return 1 === (int) $db->Affected_Rows();
-        }
-        $data['id_session'] = $id;
-        $data['kind'] = pSQL($s['kind']);
-        $data['owner'] = pSQL($this->owner);
-        $data['date_add'] = $now;
-
-        return (bool) $db->insert('ucpbridge_session', $data);
+        return $this->store->loadByOrderRef($ref);
     }
 
     /* ============================== Lignes d'articles ============================== */
@@ -410,24 +321,24 @@ class UcpBridgeCart
         if (!$this->fillCart($cart, $lines)) {
             return [200, $this->errorDoc([self::msg('out_of_stock', 'Impossible d\'ajouter les articles au panier', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
         }
-        if ($this->idUser) {
-            $cart->id_customer = $this->idUser;
-            $cart->secure_key = (new Customer($this->idUser))->secure_key;
+        if ($this->caller->idUser) {
+            $cart->id_customer = $this->caller->idUser;
+            $cart->secure_key = (new Customer($this->caller->idUser))->secure_key;
             $cart->update();
         }
         $s = [
             'id_session' => 'cart_' . bin2hex(random_bytes(10)),
             'kind' => 'cart',
-            'owner' => $this->owner,
+            'owner' => $this->caller->owner,
             'id_cart' => (int) $cart->id,
             'status' => 'active',
             'payload' => ['lines' => $lines, 'context' => $body['context'] ?? null, 'buyer' => $body['buyer'] ?? null,
-                'user_customer' => $this->idUser],
+                'user_customer' => $this->caller->idUser],
             'expires_at' => date('Y-m-d H:i:s', time() + self::TTL),
         ];
         $this->bindContext($cart);
         $msgs = $this->discounts()->sync($s, $cart, $body['discounts']['codes'] ?? [], false);
-        $this->save($s);
+        $this->store->save($s);
 
         return [201, $this->cartDoc($s, $msgs)];
     }
@@ -518,7 +429,7 @@ class UcpBridgeCart
         }
         // Réservation AVANT de toucher au panier PrestaShop : le lien de reprise (handoff) et une autre mise à jour
         // ne peuvent plus s'intercaler. Refus 409 si la session est déjà réservée ou sortie de l'API.
-        if (!$this->reserve($s['id_session'], ['active'], 'updating')) {
+        if (!$this->store->reserve($s['id_session'], ['active'], 'updating')) {
             $cur = $this->load($s['id_session'], 'cart') ?: $s;
             if ('handed_off' === $cur['status']) {
                 return [409, $this->cartDoc($cur)];
@@ -531,7 +442,7 @@ class UcpBridgeCart
         try {
             $cart = new Cart((int) $s['id_cart']);
             if ($cart->orderExists()) {
-                $this->save($s, ['updating']);
+                $this->store->save($s, ['updating']);
 
                 return [200, $this->errorDoc([self::msg('not_found', 'Ce panier a déjà donné lieu à une commande', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
             }
@@ -543,10 +454,10 @@ class UcpBridgeCart
             $this->bindContext($cart);
             $msgs = $this->discounts()->sync($s, $cart, $body['discounts']['codes'] ?? null, false);
         } catch (Throwable $e) {
-            $this->save($s, ['updating']);
+            $this->store->save($s, ['updating']);
             throw $e;
         }
-        $this->save($s, ['updating']);
+        $this->store->save($s, ['updating']);
 
         return [200, $this->cartDoc($s, $msgs)];
     }
@@ -554,7 +465,7 @@ class UcpBridgeCart
     public function cancelCart(array $s)
     {
         $s['status'] = 'canceled';
-        $this->save($s);
+        $this->store->save($s);
 
         return [200, $this->errorDoc([self::msg('canceled', 'Panier annulé', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
     }
@@ -608,20 +519,20 @@ class UcpBridgeCart
         $s = [
             'id_session' => 'chk_' . bin2hex(random_bytes(10)),
             'kind' => 'checkout',
-            'owner' => $this->owner,
+            'owner' => $this->caller->owner,
             'id_cart' => (int) $cart->id,
             'status' => 'incomplete',
             'payload' => ['lines' => $lines, 'discount_codes' => []],
             'expires_at' => date('Y-m-d H:i:s', time() + self::TTL),
         ];
-        if ($this->idUser) {
+        if ($this->caller->idUser) {
             $this->attachUser($s, $cart);
         }
         if (!isset($body['discounts'])) {
             $body['discounts'] = ['codes' => []];
         }
         $msgs = $this->applyUpdate($s, $cart, $body, false);
-        $this->save($s);
+        $this->store->save($s);
 
         return [201, $this->checkoutDoc($s, $msgs)];
     }
@@ -635,7 +546,7 @@ class UcpBridgeCart
         // fait échouer la réservation). Une session réservée (finalisation, autre mise à jour, rapprochement) est refusée
         // en 409 avec son état réel : jamais de totaux d'une mise à jour non enregistrée.
         $prev = $s['status'];
-        if (self::isBusy($prev) || !$this->reserve($s['id_session'], [$prev], 'updating')) {
+        if (self::isBusy($prev) || !$this->store->reserve($s['id_session'], [$prev], 'updating')) {
             $cur = $this->load($s['id_session'], 'checkout') ?: $s;
             if (self::isTerminal($cur['status'])) {
                 return [200, $this->checkoutDoc($cur, [self::msg('not_modifiable', 'Session ' . self::exposedStatus($cur['status']) . ' : modification impossible', 'unrecoverable')])];
@@ -650,10 +561,10 @@ class UcpBridgeCart
             $msgs = $this->applyUpdate($s, $cart, $body, true);
         } catch (Throwable $e) {
             $s['status'] = $prev;
-            $this->save($s, ['updating']);
+            $this->store->save($s, ['updating']);
             throw $e;
         }
-        $this->save($s, ['updating']);
+        $this->store->save($s, ['updating']);
 
         return [200, $this->checkoutDoc($s, $msgs)];
     }
@@ -932,7 +843,7 @@ class UcpBridgeCart
         $cart = new Cart((int) $s['id_cart']);
         $this->bindContext($cart);
         $s['status'] = $this->computeStatus($s, $cart);
-        $this->save($s);
+        $this->store->save($s);
 
         return $s;
     }
@@ -1031,7 +942,7 @@ class UcpBridgeCart
     {
         if (!in_array($s['status'], self::LOCKED, true)) {
             $s['status'] = 'canceled';
-            if (!$this->save($s)) {
+            if (!$this->store->save($s)) {
                 $s = $this->load($s['id_session'], 'checkout');
             }
         }
@@ -1078,7 +989,7 @@ class UcpBridgeCart
         $status = $this->computeStatus($s, $cart);
         if ('ready_for_complete' !== $status) {
             $s['status'] = $status;
-            $this->save($s);
+            $this->store->save($s);
 
             return [200, $this->checkoutDoc($s)];
         }
@@ -1098,7 +1009,7 @@ class UcpBridgeCart
         // Réservation atomique : une seule requête passe de ready_for_complete à complete_in_progress, quelles que
         // soient les clés d'idempotence. Les autres reçoivent l'état courant, sans débit ; une mise à jour en cours
         // (updating) fait refuser la finalisation en 409.
-        if (!$this->reserve($s['id_session'], ['ready_for_complete', 'incomplete'], 'complete_in_progress')) {
+        if (!$this->store->reserve($s['id_session'], ['ready_for_complete', 'incomplete'], 'complete_in_progress')) {
             $cur = $this->load($s['id_session'], 'checkout') ?: $s;
             if ('updating' === $cur['status']) {
                 return [409, $this->checkoutDoc($cur, [self::msg('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
@@ -1122,7 +1033,7 @@ class UcpBridgeCart
                 // Rien n'a été débité : la session redevient finalisable.
                 unset($s['payload']['charge_started_at']);
                 $s['status'] = 'ready_for_complete';
-                $this->save($s, ['complete_in_progress']);
+                $this->store->save($s, ['complete_in_progress']);
                 throw $e;
             }
 
@@ -1139,7 +1050,7 @@ class UcpBridgeCart
         unset($s['payload']['charge_started_at']);
         $s['status'] = 'incomplete';
         $s['status'] = $this->computeStatus($s, $cart);
-        $this->save($s, ['complete_in_progress']);
+        $this->store->save($s, ['complete_in_progress']);
 
         return [200, $this->checkoutDoc($s, $msgs)];
     }
@@ -1152,7 +1063,7 @@ class UcpBridgeCart
     private function chargeUnknown(array $s, $providerName, $reason)
     {
         $s['payload']['charge_unknown'] = true;
-        $this->save($s, ['complete_in_progress']);
+        $this->store->save($s, ['complete_in_progress']);
         PrestaShopLogger::addLog('ucpbridge incident : session ' . $s['id_session'] . ', résultat du débit inconnu (' . $providerName
             . ', clé d\'idempotence ' . ($s['payload']['charge_idempotency_key'] ?? '?') . ') : ' . $reason
             . ' ; session laissée en finalisation, à rapprocher et à vérifier chez le prestataire', 3);
@@ -1200,7 +1111,7 @@ class UcpBridgeCart
             || !hash_equals((string) $customer->secure_key, (string) $cart->secure_key);
         if ($incoherent) {
             $s['status'] = 'handed_off';
-            $this->save($s, ['complete_in_progress']);
+            $this->store->save($s, ['complete_in_progress']);
             PrestaShopLogger::addLog('ucpbridge session ' . $s['id_session'] . ' : panier ' . (int) $cart->id
                 . ' modifié hors API (commande existante ou client différent), finalisation refusée sans débit', 2);
 
@@ -1228,7 +1139,7 @@ class UcpBridgeCart
         $s['payload']['charge_started_at'] = gmdate('Y-m-d\TH:i:s\Z');
         $s['payload']['charge_idempotency_key'] = $idemKey;
         $s['payload']['charge_provider'] = $provider->getName();
-        $this->save($s, ['complete_in_progress']);
+        $this->store->save($s, ['complete_in_progress']);
         $pay = $provider->charge((array) ($instr['credential'] ?? []), $cents, $currency->iso_code, [
             'instrument' => $instr,
             'id_cart' => (int) $cart->id,
@@ -1248,7 +1159,7 @@ class UcpBridgeCart
             unset($s['payload']['charge_started_at']);
             $s['status'] = 'requires_escalation';
             $s['payload']['escalation_url'] = $pay->actionUrl;
-            $this->save($s, ['complete_in_progress']);
+            $this->store->save($s, ['complete_in_progress']);
 
             return [200, $this->checkoutDoc($s)];
         }
@@ -1261,7 +1172,7 @@ class UcpBridgeCart
             // Refus définitif : le prochain essai, même avec la même carte, part avec une nouvelle clé d'idempotence.
             $s['payload']['charge_attempt'] = (int) ($s['payload']['charge_attempt'] ?? 0) + 1;
             $s['status'] = 'ready_for_complete';
-            $this->save($s, ['complete_in_progress']);
+            $this->store->save($s, ['complete_in_progress']);
 
             return [200, $this->checkoutDoc($s, [self::msg('payment_failed', $pay->message, 'recoverable', '$.payment.instruments[0].credential')])];
         }
@@ -1293,8 +1204,8 @@ class UcpBridgeCart
                 'id_order' => $s['id_order'],
                 'id_cart' => (int) $cart->id,
                 'session_id' => $s['id_session'],
-                'agent' => $this->agent,
-                'caller' => $this->owner,
+                'agent' => $this->caller->agent,
+                'caller' => $this->caller->owner,
                 'api_ip' => (string) Tools::getRemoteAddr(),
                 'api_user_agent' => (string) ($_SERVER['HTTP_USER_AGENT'] ?? ''),
                 'terms_version' => $this->module->termsInfo()['version'],
@@ -1322,7 +1233,7 @@ class UcpBridgeCart
         $s['payload']['payment_label'] = (string) $label;
         unset($s['payload']['charge_started_at']);
         $s['status'] = 'completed';
-        $this->save($s, ['complete_in_progress', 'reconciling']);
+        $this->store->save($s, ['complete_in_progress', 'reconciling']);
 
         return $s;
     }
@@ -1358,7 +1269,7 @@ class UcpBridgeCart
         $s['status'] = 'failed';
         $s['payload']['failure'] = ['transaction_id' => $charged['transaction_id'], 'refunded' => $ok,
             'refund_id' => $ok ? $refund->transactionId : '', 'at' => gmdate('Y-m-d\TH:i:s\Z')];
-        $this->save($s, ['complete_in_progress', 'reconciling']);
+        $this->store->save($s, ['complete_in_progress', 'reconciling']);
 
         return [200, $this->checkoutDoc($s)];
     }
@@ -1403,7 +1314,7 @@ class UcpBridgeCart
         $done = [];
         foreach ($rows as $r) {
             $id = (string) $r['id_session'];
-            if (!$this->reserve($id, [$r['status']], 'reconciling', $before)) {
+            if (!$this->store->reserve($id, [$r['status']], 'reconciling', $before)) {
                 continue; // repris entre-temps par un autre processus
             }
             $s = $this->load($id, 'checkout');
@@ -1427,7 +1338,7 @@ class UcpBridgeCart
             // Mise à jour interrompue : le panier reflète ce qui a été écrit, la session redevient modifiable.
             $s['status'] = !empty($s['payload']['escalation_url']) ? 'requires_escalation' : 'incomplete';
             $s['status'] = $this->computeStatus($s, $cart);
-            $this->save($s, ['reconciling']);
+            $this->store->save($s, ['reconciling']);
             PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ', mise à jour interrompue, session rendue (' . $s['status'] . ')', 2);
 
             return 'mise à jour interrompue, session rendue';
@@ -1458,7 +1369,7 @@ class UcpBridgeCart
                 . ' sans commande, adaptateur ' . $charge['provider'] . ' introuvable : remboursement à faire à la main', 4);
             $s['status'] = 'failed';
             $s['payload']['failure'] = ['transaction_id' => $charge['transaction_id'], 'refunded' => false, 'refund_id' => '', 'at' => gmdate('Y-m-d\TH:i:s\Z')];
-            $this->save($s, ['reconciling']);
+            $this->store->save($s, ['reconciling']);
 
             return 'débit sans commande, adaptateur introuvable';
         }
@@ -1469,14 +1380,14 @@ class UcpBridgeCart
                 . ($s['payload']['charge_idempotency_key'] ?? '?') . ') : vérifier chez le prestataire et rembourser si besoin', 4);
             $s['status'] = 'failed';
             $s['payload']['failure'] = ['transaction_id' => '', 'refunded' => false, 'unknown' => true, 'at' => gmdate('Y-m-d\TH:i:s\Z')];
-            $this->save($s, ['reconciling']);
+            $this->store->save($s, ['reconciling']);
 
             return 'débit incertain, à vérifier chez le prestataire';
         }
         // Réservation sans débit engagé : la session redevient finalisable.
         $s['status'] = 'incomplete';
         $s['status'] = $this->computeStatus($s, $cart);
-        $this->save($s, ['reconciling']);
+        $this->store->save($s, ['reconciling']);
         PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ' bloquée sans débit, rendue (' . $s['status'] . ')', 1);
 
         return 'aucun débit, session rendue (' . $s['status'] . ')';
