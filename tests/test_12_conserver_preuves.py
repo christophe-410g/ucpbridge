@@ -76,8 +76,9 @@ def test_desinstallation_conserve_preuves_retractations_et_paiements(boutique, r
     assert all(avant.values())
     r = console("prestashop:module", "uninstall", "ucpbridge")
     assert r.returncode == 0, r.stdout + r.stderr
-    # Seules les tables de preuve restent ; configuration et autres tables supprimées comme avant.
-    assert tables() == sorted(PREUVES)
+    # Seules les tables de preuve restent (et la liste des invités créés par le module, pour la purge RGPD) ;
+    # configuration et autres tables supprimées comme avant.
+    assert tables() == sorted(PREUVES + ["ps_ucpbridge_customer"])
     assert {t: contenu(t) for t in PREUVES} == avant
     assert sql_val("SELECT COUNT(*) FROM ps_configuration WHERE name LIKE 'UCPBRIDGE\\_%'") == "0"
     # Réinstallation : tout est retrouvé, la preuve reste affichée sur la fiche commande.

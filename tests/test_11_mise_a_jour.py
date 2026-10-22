@@ -199,6 +199,14 @@ def test_tout_fonctionne_apres_la_mise_a_jour(boutique, oauth_meta, mise_a_jour)
     assert appel("GET", f"{BASE}/.well-known/ucp").code == 200
 
 
+def test_clients_invites_de_la_012_repris_pour_la_purge(mise_a_jour):
+    """Les invités créés par les sessions de la 0.1.2 sont enregistrés comme créés par le module (purge RGPD, #13)."""
+    invites = set(sql("SELECT DISTINCT c.id_customer FROM ps_ucpbridge_session s JOIN ps_cart c ON c.id_cart = s.id_cart "
+                      "JOIN ps_customer cu ON cu.id_customer = c.id_customer WHERE cu.is_guest = 1").split())
+    assert invites
+    assert invites <= set(sql("SELECT id_customer FROM ps_ucpbridge_customer").split())
+
+
 def test_script_rejouable(mise_a_jour):
     donnees = {t: contenu(t) for t in TABLES_DONNEES}
     fichier = f"/var/www/html/modules/ucpbridge/upgrade/upgrade-{version_courante()}.php"
