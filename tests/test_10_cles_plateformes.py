@@ -129,3 +129,12 @@ def test_back_office_ajout_regeneration_suppression(boutique):
         supprimer("bo-test")
     # La plateforme par défaut n'a pas bougé.
     assert cle_api() == boutique.cle
+
+
+def test_back_office_identifiant_echappe_dans_la_confirmation(boutique):
+    """Relecture M2 : l'identifiant de plateforme reçu en POST est échappé dans le message de confirmation."""
+    piege = '<img src=x onerror="alert(1)">'
+    html = back_office({"submitUcpbridgeApiKeyDelete": "1", "ucp_csrf": "JETON", "api_key_id": piege})
+    assert "alert-success" in html, html[-2000:]
+    assert piege not in html and "&lt;img src=x" in html
+    assert cle_api() == boutique.cle
