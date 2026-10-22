@@ -3,6 +3,10 @@
 <xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" version="1.2">
   <file original="ucpbridge" source-language="en-US" target-language="fr-FR" datatype="plaintext">
     <body>
+      <trans-unit id="735129e71fb4142e0794b6621412c459">
+        <source>%category%: %days% days, legal minimum %min% days</source>
+        <target>%category% : %days% jours, minimum légal %min% jours</target>
+      </trans-unit>
       <trans-unit id="bbaea321d0438178ffcd0ec62f63d3c9">
         <source>%count% session(s) processed, threshold %minutes% minute(s)</source>
         <target>%count% session(s) traitée(s), seuil %minutes% minute(s)</target>
@@ -110,6 +114,10 @@
       <trans-unit id="7ed52c8bbd96c1a137545cc23dfcc617">
         <source>Default %default%, 0 = never purged, %max% at most.</source>
         <target>Défaut %default%, 0 = jamais purgé, %max% au plus.</target>
+      </trans-unit>
+      <trans-unit id="ab561aa898fef7491b432bef72d87438">
+        <source>Default %default%, legal minimum %min%, 0 = never purged, %max% at most.</source>
+        <target>Défaut %default%, minimum légal %min%, 0 = jamais purgé, %max% au plus.</target>
       </trans-unit>
       <trans-unit id="1261cee50e33813c3b9d3479a1abc39b">
         <source>Default platform</source>
@@ -351,6 +359,10 @@
         <source>Purge of personal data</source>
         <target>Purge des données personnelles</target>
       </trans-unit>
+      <trans-unit id="6e01b047ddc58b922631d9fceff0f4bb">
+        <source>Purge refused, nothing was deleted: retention period too short (%list%; or 0 to never purge). Fix the periods in the module configuration.</source>
+        <target>Purge refusée, rien n'a été supprimé : durée de conservation trop courte (%list% ; ou 0 pour ne jamais purger). Corrigez les durées dans la configuration du module.</target>
+      </trans-unit>
       <trans-unit id="2591a150d5ee629e59595b29bb928b61">
         <source>Purge report:</source>
         <target>Compte rendu de la purge :</target>
@@ -378,6 +390,10 @@
       <trans-unit id="e96ed073ffb71177ab2c8a5dfabc96af">
         <source>Registered clients</source>
         <target>Clients enregistrés</target>
+      </trans-unit>
+      <trans-unit id="ad0ec5f6d886eba49704c34293758cdc">
+        <source>Retention period too short (%category%): the law requires keeping these records for 10 years. Enter at least %min% days, or 0 to never purge. No period changed.</source>
+        <target>Durée de conservation trop courte (%category%) : la loi impose de conserver ces pièces 10 ans. Saisissez au moins %min% jours, ou 0 pour ne jamais purger. Aucune durée modifiée.</target>
       </trans-unit>
       <trans-unit id="ae94f1dcdb359e86c6882452a5615aaf">
         <source>Retention periods saved.</source>

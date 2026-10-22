@@ -61,4 +61,22 @@ final class RetentionTest extends TestCase
         $this->assertNotSame($lines['guests'], $dry['guests']);
         $this->assertStringEndsWith(' : 2', $dry['guests']);
     }
+
+    public function testPlanchersDesDureesLegales(): void
+    {
+        // Journal des paiements, preuves et rétractations : 10 ans au moins, ou 0 (jamais purgé).
+        $this->assertSame(['payments' => 3650, 'proofs' => 3650], UcpBridgeRetention::LEGAL_MIN_DAYS);
+        foreach (['payments', 'proofs'] as $cat) {
+            foreach ([1, 30, 365, 3649] as $days) {
+                $this->assertTrue(UcpBridgeRetention::tooShort($cat, $days), $cat . ' ' . $days);
+            }
+            foreach ([0, 3650, 4000, UcpBridgeRetention::MAX_DAYS] as $days) {
+                $this->assertFalse(UcpBridgeRetention::tooShort($cat, $days), $cat . ' ' . $days);
+            }
+        }
+        foreach (['sessions', 'guests', 'oauth'] as $cat) {
+            $this->assertFalse(UcpBridgeRetention::tooShort($cat, 1), $cat);
+        }
+        $this->assertSame(['proofs' => 365], UcpBridgeRetention::tooShortAll(['sessions' => 1, 'payments' => 0, 'proofs' => 365]));
+    }
 }

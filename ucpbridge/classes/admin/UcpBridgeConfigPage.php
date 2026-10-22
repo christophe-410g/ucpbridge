@@ -99,10 +99,12 @@ class UcpBridgeConfigPage
             return $this->module->displayError(UcpBridgeI18n::admin('Invalid security token: API keys unchanged.'));
         }
         $id = (string) Tools::getValue('api_key_id');
+        // Identifiant reçu en POST, affiché dans un message que displayConfirmation() n'échappe pas.
+        $shown = htmlspecialchars($id, ENT_QUOTES, 'UTF-8');
         if (Tools::isSubmit('submitUcpbridgeApiKeyDelete')) {
             UcpBridgeApiKeys::remove($id);
 
-            return $this->module->displayConfirmation(UcpBridgeI18n::admin('Key of platform "%id%" deleted: it is refused from now on.', ['%id%' => $id]));
+            return $this->module->displayConfirmation(UcpBridgeI18n::admin('Key of platform "%id%" deleted: it is refused from now on.', ['%id%' => $shown]));
         }
         $key = Tools::isSubmit('submitUcpbridgeApiKeyAdd')
             ? UcpBridgeApiKeys::add($id, (string) Tools::getValue('api_key_label'))
@@ -111,7 +113,8 @@ class UcpBridgeConfigPage
             return $this->module->displayError(UcpBridgeI18n::admin('Invalid or already used platform identifier (lowercase letters, digits, - and _, 32 characters at most).'));
         }
 
-        return $this->module->displayConfirmation(UcpBridgeI18n::admin('Key of platform "%id%": %key% (to be given to this platform only)', ['%id%' => $id, '%key%' => $key]));
+        return $this->module->displayConfirmation(UcpBridgeI18n::admin('Key of platform "%id%": %key% (to be given to this platform only)',
+            ['%id%' => $shown, '%key%' => htmlspecialchars($key, ENT_QUOTES, 'UTF-8')]));
     }
 
     /** Enregistrement des durées, simulation ou purge. */
@@ -131,6 +134,10 @@ class UcpBridgeConfigPage
                 if (null === $v) {
                     return $this->module->displayError(UcpBridgeI18n::admin('Invalid retention period (%category%): a whole number of days, from 0 to %max%. No period changed.', ['%category%' => UcpBridgeRetention::label($cat), '%max%' => UcpBridgeRetention::MAX_DAYS]));
                 }
+                if (UcpBridgeRetention::tooShort($cat, $v)) {
+                    // Durée légale (paiements, preuves) : jamais sous le plancher, une faute de frappe effacerait des pièces.
+                    return $this->module->displayError(UcpBridgeRetention::tooShortMessage($cat));
+                }
                 $values[$c[0]] = $v;
             }
             foreach ($values as $k => $v) {
@@ -138,6 +145,9 @@ class UcpBridgeConfigPage
             }
 
             return $this->module->displayConfirmation(UcpBridgeI18n::admin('Retention periods saved.'));
+        }
+        if ($bad = UcpBridgePurge::refusedDurations()) {
+            return $this->module->displayError(UcpBridgeRetention::purgeRefusedMessage($bad));
         }
         $dry = Tools::isSubmit('submitUcpbridgePurgeDry');
         $lines = [];
@@ -361,7 +371,10 @@ class UcpBridgeConfigPage
         foreach (UcpBridgeRetention::CATEGORIES as $cat => $c) {
             $inputs[] = ['type' => 'text', 'name' => $c[0], 'label' => UcpBridgeRetention::label($cat), 'class' => 'fixed-width-sm',
                 'suffix' => UcpBridgeI18n::admin('days'),
-                'desc' => UcpBridgeI18n::admin('Default %default%, 0 = never purged, %max% at most.', ['%default%' => (int) $c[1], '%max%' => UcpBridgeRetention::MAX_DAYS])];
+                'desc' => isset(UcpBridgeRetention::LEGAL_MIN_DAYS[$cat])
+                    ? UcpBridgeI18n::admin('Default %default%, legal minimum %min%, 0 = never purged, %max% at most.', ['%default%' => (int) $c[1],
+                        '%min%' => (int) UcpBridgeRetention::LEGAL_MIN_DAYS[$cat], '%max%' => UcpBridgeRetention::MAX_DAYS])
+                    : UcpBridgeI18n::admin('Default %default%, 0 = never purged, %max% at most.', ['%default%' => (int) $c[1], '%max%' => UcpBridgeRetention::MAX_DAYS])];
             $values[$c[0]] = (int) $days[$cat];
         }
 

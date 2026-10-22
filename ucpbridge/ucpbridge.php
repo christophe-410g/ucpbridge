@@ -133,7 +133,10 @@ class Ucpbridge extends PaymentModule
     {
         // Clé unique de la 0.1.2 (UCPBRIDGE_API_KEY) migrée vers la plateforme « default » AVANT de créer les clés
         // manquantes : sinon UCPBRIDGE_API_KEYS naîtrait avec une clé neuve et la plateforme en place perdrait l'accès.
-        UcpBridgeApiKeys::all();
+        // L'ancienne clé n'est supprimée qu'une fois la nouvelle enregistrée ; sinon la mise à jour échoue.
+        if (!UcpBridgeApiKeys::migrateLegacy()) {
+            return false;
+        }
 
         return $this->installProviderHook()
             && $this->registerHook(self::HOOKS)
