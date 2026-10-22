@@ -1,5 +1,6 @@
 # Intégration continue du module ucpbridge : lint PHP, tests unitaires PHPUnit, puis suite d'intégration
-# (pytest + Playwright) contre le banc docker compose (PrestaShop 9.1.5, MySQL, stripe-mock, mailpit).
+# (pytest + Playwright) contre le banc docker compose (MySQL, stripe-mock, mailpit), une fois par version de
+# PrestaShop prise en charge : 8.0, 8.1, 8.2 (PHP 8.1), 9.0, 9.1, 9.2 (PHP de l'image).
 # Aucun secret requis : tout tourne en local sur le runner, rien ne sort vers un service réel.
 #
 # Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
@@ -26,8 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 8.3 : minimum de PHPUnit 12 ; 8.5 : version de l'image prestashop/prestashop:9.1.5 du banc.
-        php: ["8.3", "8.5"]
+        # 8.1 : minimum du module (lint seulement, PHPUnit 12 exige 8.3) ; 8.3 : minimum de PHPUnit 12 ;
+        # 8.5 : version de l'image prestashop/prestashop:9.1.5 du banc.
+        php: ["8.1", "8.3", "8.5"]
     steps:
       - uses: actions/checkout@v7
 
@@ -38,12 +40,14 @@ jobs:
           tools: none
 
       - name: Cache PHPUnit
+        if: matrix.php != '8.1'
         uses: actions/cache@v6
         with:
           path: tools/phpunit.phar
           key: phpunit-${{ hashFiles('tools/get-phpunit.sh') }}
 
       - name: PHPUnit épinglé (somme SHA-256 vérifiée)
+        if: matrix.php != '8.1'
         run: ./tools/get-phpunit.sh
 
       - name: Lint PHP (php -l)
@@ -59,6 +63,7 @@ jobs:
           echo "$(grep -c '^No syntax errors' lint.log) fichiers PHP sans erreur de syntaxe"
 
       - name: Tests unitaires (PHPUnit)
+        if: matrix.php != '8.1'
         working-directory: ucpbridge/tests
         run: php ../../tools/phpunit.phar
 
@@ -74,11 +79,18 @@ jobs:
           retention-days: 14
 
   integration:
-    name: Intégration (banc docker, pytest et Playwright)
+    name: Intégration PrestaShop ${{ matrix.prestashop }} (banc docker, pytest et Playwright)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Une version par branche mineure prise en charge (étiquettes exactes de l'image officielle) :
+        # PrestaShop 8 avec sa variante PHP 8.1 (minimum du module), PrestaShop 9 avec le PHP par défaut de l'image.
+        prestashop: ["8.0.5-8.1-apache", "8.1.7-8.1-apache", "8.2.8-8.1-apache", "9.0.3", "9.1.5", "9.2.0"]
     env:
       UCP_PROJECT: ucpbridge-ci
+      PS_IMAGE: ${{ matrix.prestashop }}
       UCP_PORT: "8092"
       # Sous Linux, la boutique joint le faux Stripe du test_08 par la passerelle docker (host-gateway).
       FAUX_STRIPE_HOTE: 0.0.0.0
@@ -91,7 +103,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .cache/images.tar
-          key: images-${{ hashFiles('docker-compose.yml') }}
+          key: images-${{ matrix.prestashop }}-${{ hashFiles('docker-compose.yml') }}
 
       - name: Images docker (cache ou téléchargement)
         run: |
@@ -164,6 +176,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: journaux-integration
+          name: journaux-integration-${{ matrix.prestashop }}
           path: test-logs/
           retention-days: 14

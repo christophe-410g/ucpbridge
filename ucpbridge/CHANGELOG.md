@@ -33,6 +33,19 @@ Nouveautés
   preuves et rétractations après 10 ans ; clés d'idempotence de plus de 24 h. Aucune commande touchée. Nouvelle table
   `ps_ucpbridge_customer` (invités créés par le module, renseignée à la création de l'invité, reprise depuis les
   sessions à la mise à jour depuis la 0.1.2, conservée à la désinstallation avec les preuves).
+- Compatibilité PrestaShop 8.0 à 9.2 (#14) : `ps_versions_compliancy` minimum ramené de 9.1.0 à 8.0.0 ; suite
+  complète éprouvée sur les images officielles 8.0.5, 8.1.7 et 8.2.8 (PHP 8.1), 9.0.3, 9.1.5 et 9.2.0 (PHP de
+  l'image). Aucun changement du code fonctionnel n'a été nécessaire. PHP 8.1 minimum, vérifié à l'installation
+  (`Ucpbridge::PHP_MIN`) : sous PHP 7.2 à 8.0, que PrestaShop 8 accepte encore, l'installation est refusée avec un
+  message clair. Banc d'essai multiversion : variable `PS_IMAGE` du `docker-compose.yml` (9.1.5 par défaut) ; attente
+  de la boutique qui suit les redirections (PrestaShop 8 renvoie `/` vers `/fr/`) ; jeu de démo sans la colonne
+  `carrier.id_tax_rules_group`, absente en PrestaShop 8 ; `run-unit.sh` lance PHPUnit 12 avec le PHP de l'hôte
+  (`UNIT_PHP`) quand l'image est en PHP 8.1 ; tests d'intégration indépendants de la version (noyau Symfony
+  `AdminKernel` ou `AppKernel`, confirmation du lien d'administration sans jeton, lien des commandes à jeton
+  Symfony, 0.1.2 installée en abaissant son seul minimum pour éprouver la mise à jour sur PrestaShop 8, back-office
+  attendu au chargement et non plus au repos réseau, que le tableau de bord 9.2 n'atteint jamais) ; conteneur
+  PrestaShop relancé s'il s'arrête en erreur (l'image 9.2.0 échoue juste après une installation réussie). Intégration
+  continue : lint sous PHP 8.1 et matrice d'intégration d'une version par branche mineure.
 
 Corrections
 

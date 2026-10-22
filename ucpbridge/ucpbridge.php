@@ -71,15 +71,26 @@ class Ucpbridge extends PaymentModule
         $this->author = 'Friends of Presta (Christophe Vidal)';
         $this->need_instance = 0;
         $this->bootstrap = true;
-        // Seule version éprouvée par la suite de tests : PrestaShop 9.1 (image 9.1.5, PHP 8.5).
-        $this->ps_versions_compliancy = ['min' => '9.1.0', 'max' => _PS_VERSION_];
+        // Versions éprouvées par la suite de tests (images officielles) : PrestaShop 8.0, 8.1 et 8.2 sous PHP 8.1,
+        // 9.0, 9.1 et 9.2 sous le PHP de leur image. PHP 8.1 minimum (voir install()).
+        $this->ps_versions_compliancy = ['min' => '8.0.0', 'max' => _PS_VERSION_];
         parent::__construct();
         $this->displayName = self::DISPLAY_NAME;
         $this->description = 'Universal Commerce Protocol : profil, panier transférable, caisse native, déclinaisons, CGV et preuve, MCP.';
     }
 
+    /** PHP minimum du module : PrestaShop 8 accepte encore PHP 7.2 à 8.0, que le module ne prend pas en charge. */
+    const PHP_MIN = '8.1.0';
+
     public function install()
     {
+        if (version_compare(PHP_VERSION, self::PHP_MIN, '<')) {
+            $this->_errors[] = self::DISPLAY_NAME . ' exige PHP ' . self::PHP_MIN . ' ou plus récent (PHP ' . PHP_VERSION
+                . ' sur ce serveur). Mettre PHP à jour avant d\'installer le module.';
+
+            return false;
+        }
+
         return parent::install()
             && $this->registerHook(self::HOOKS)
             && $this->installProviderHook()
