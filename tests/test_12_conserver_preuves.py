@@ -14,7 +14,7 @@ import urllib.parse
 
 import pytest
 
-from conftest import BASE, PS, admin_dir, admin_login, config, id_commande, php, set_config, sql, sql_val
+from conftest import BASE, PS, admin_login, config, id_commande, ouvrir_configuration, php, set_config, sql, sql_val
 
 PREUVES = ["ps_ucpbridge_proof", "ps_ucpbridge_withdrawal", "ps_ucpbridge_payment"]
 CLES = {"ps_ucpbridge_proof": "id_proof", "ps_ucpbridge_withdrawal": "id_order", "ps_ucpbridge_payment": "id_payment"}
@@ -137,9 +137,7 @@ def test_export_depuis_le_back_office(boutique):
         nav = pw.chromium.launch()
         page = nav.new_page(locale="fr-FR", viewport={"width": 1280, "height": 1000}, accept_downloads=True)
         admin_login(page)
-        page.goto(f"{BASE}/{admin_dir()}/index.php?controller=AdminModules&configure=ucpbridge")
-        if "compromised" in page.url:
-            page.click("text=Oui, je comprends les risques")
+        ouvrir_configuration(page)
         lien = page.locator("a#ucpbridge-export")
         lien.wait_for(timeout=15000)
         with page.expect_download() as dl:

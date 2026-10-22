@@ -62,6 +62,12 @@ def cle_api(plateforme="default"):
     return json.loads(config("UCPBRIDGE_API_KEYS") or "{}").get(plateforme, {}).get("key", "")
 
 
+# Noyau Symfony du back-office (validateOrder en a besoin) : AdminKernel en PrestaShop 9, AppKernel en PrestaShop 8.
+NOYAU_PHP = ("if (is_file('/var/www/html/app/AdminKernel.php')) { require_once '/var/www/html/app/AdminKernel.php'; $ucpNoyau = 'AdminKernel'; }"
+             " else { require_once '/var/www/html/app/AppKernel.php'; $ucpNoyau = 'AppKernel'; }"
+             " global $kernel; $kernel = new $ucpNoyau('prod', false); $kernel->boot();\n")
+
+
 def php(code):
     """Exécute du PHP dans le conteneur de la boutique, PrestaShop chargé."""
     script = "<?php define('_PS_ADMIN_DIR_', '/var/www/html/admin'); require '/var/www/html/config/config.inc.php';\n" + code
@@ -282,7 +288,20 @@ def admin_login(page):
     page.fill("#email", ADMIN_EMAIL)
     page.fill("#passwd", ADMIN_MDP)
     page.click("#submit_login")
-    page.wait_for_load_state("networkidle")
+    # Connexion en AJAX puis redirection vers le tableau de bord. Pas d'attente « networkidle » : le tableau de bord de
+    # PrestaShop 9.2 interroge le serveur en continu et n'est jamais au repos.
+    page.wait_for_url(lambda u: "AdminLogin" not in u, timeout=30000)
+    page.wait_for_load_state("load")
+
+
+def ouvrir_configuration(page):
+    """Page de configuration du module. Le lien n'a pas de jeton d'administration : PrestaShop demande confirmation,
+    sur une page à part en 9 (URL « compromised »), dans la page elle-même en 8."""
+    page.goto(f"{BASE}/{admin_dir()}/index.php?controller=AdminModules&configure=ucpbridge")
+    risques = page.locator("text=/comprends les risques/")
+    if risques.count():
+        with page.expect_navigation(wait_until="load"):
+            risques.first.click()
 
 
 def mails(destinataire):

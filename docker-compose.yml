@@ -3,6 +3,9 @@ name: ${UCP_PROJECT:-bench-ucp-bridge}
 # Banc UCP n°3 : prototype ucpbridge (podcast Contrib.), port 8092.
 # Ports et nom de projet réglables (banc parallèle, intégration continue) : UCP_PROJECT, UCP_PORT,
 # STRIPE_MOCK_PORT, MAILPIT_PORT. Sans variable, valeurs historiques ci-dessous.
+# Version de PrestaShop : PS_IMAGE (étiquette de l'image officielle prestashop/prestashop, défaut 9.1.5), par exemple
+# PS_IMAGE=8.1.7 ou PS_IMAGE=8.2.8. Chaque image embarque sa propre version de PHP (8.1 pour PrestaShop 8, 8.5 pour 9.1).
+# Changer de version sur un banc existant impose de repartir de volumes vides (docker compose down -v).
 services:
   mysql:
     image: mysql:8.0
@@ -12,8 +15,11 @@ services:
     volumes:
       - db:/var/lib/mysql
   prestashop:
-    image: prestashop/prestashop:9.1.5
+    image: prestashop/prestashop:${PS_IMAGE:-9.1.5}
     depends_on: [mysql]
+    # Image 9.2.0 : le script de démarrage s'arrête en erreur juste après une installation réussie (dossier install/
+    # déjà supprimé par l'installeur). Relancé, le conteneur trouve PrestaShop installé et démarre Apache.
+    restart: on-failure:3
     environment:
       DB_SERVER: mysql
       DB_NAME: prestashop

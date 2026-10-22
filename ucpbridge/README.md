@@ -12,7 +12,7 @@ Nom affiché : « UCP Bridge pour PrestaShop ». Nom technique (dossier, classe,
 `ucpbridge`.
 
 Implémente le protocole UCP (Universal Commerce Protocol, version `2026-04-08`, https://ucp.dev)
-sur PrestaShop 9.1 (seule version éprouvée, minimum déclaré 9.1.0), écrit à partir de la spécification.
+sur PrestaShop 8.0 à 9.2 (PHP 8.1 minimum, voir « Compatibilité et code »), écrit à partir de la spécification.
 **Appels sortants** : le module ne télécharge jamais le profil des agents. Le seul appel réseau est celui de
 l'adaptateur Stripe (débit et remboursement) : vers `https://api.stripe.com` dès qu'une clé `sk_test_` est
 enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. Sans clé Stripe, aucun appel sortant.
@@ -344,8 +344,26 @@ Preuve, données personnelles, conformité
 - Aucune chaîne traduisible (`$this->l()` / `trans()`) : messages aux agents en français, modèle `mails/en/` en français.
 
 Compatibilité et code
-- Éprouvé uniquement sur PrestaShop **9.1.5** (image Docker officielle, PHP 8.5). Minimum déclaré 9.1.0. PrestaShop 8
-  n'est pas testé. PHP minimum : celui de PrestaShop 9.1 (8.1) ; les tests unitaires exigent PHPUnit 12, donc PHP 8.3.
+- Versions de PrestaShop éprouvées par la suite complète (images Docker officielles `prestashop/prestashop`, une par
+  branche mineure) :
+
+  | PrestaShop | Image | PHP |
+  |---|---|---|
+  | 8.0 | `8.0.5-8.1-apache` | 8.1 |
+  | 8.1 | `8.1.7-8.1-apache` | 8.1 |
+  | 8.2 | `8.2.8-8.1-apache` | 8.1 |
+  | 9.0 | `9.0.3` | 8.4 |
+  | 9.1 | `9.1.5` | 8.5 |
+  | 9.2 | `9.2.0` | 8.5 |
+
+  Minimum déclaré (`ps_versions_compliancy`) : 8.0.0. PrestaShop 1.7 n'est pas pris en charge.
+- **PHP 8.1 minimum**, vérifié à l'installation : sous PHP 7.2 à 8.0 (que PrestaShop 8 accepte encore), l'installation
+  est refusée avec un message qui donne la version trouvée. PHP 7 n'est plus maintenu depuis fin 2022 : le module n'est
+  pas testé dessus. Les tests unitaires exigent PHPUnit 12, donc PHP 8.3 : sur une image PrestaShop 8 (PHP 8.1),
+  `run-unit.sh` les lance avec le PHP de l'hôte (tests de logique pure, sans PrestaShop).
+- Mise à jour en place (scripts `upgrade/`) éprouvée sur toutes ces versions. Sur PrestaShop 8, aucune boutique n'a pu
+  installer la 0.1.2 (elle exigeait 9.1.0) : le test de mise à jour y installe la 0.1.2 en abaissant ce seul minimum,
+  pour éprouver le mécanisme, pas un chemin qu'un marchand aurait suivi.
 - Mise à jour en place éprouvée à partir de la 0.1.2 seulement (première version publiée) : une version de test
   antérieure se désinstalle puis s'installe.
 - Concurrence entre le lien de reprise et une mise à jour : si l'acheteur ouvre le lien pendant qu'une mise à jour de
@@ -437,7 +455,9 @@ npx @modelcontextprotocol/inspector@2.9.0 --cli https://<domaine>/ucp/v1/mcp --t
 
 Les scripts et tests ci-dessous vivent à la racine du dépôt, pas dans l'archive du module (`seed-demo.php`,
 `run-tests.sh`, `tests/` et `ucpbridge/tests/` n'y figurent pas). Ils pilotent un docker compose « bench-ucp-bridge »
-(prestashop, mysql, stripe-mock, mailpit). Déposer `phpunit.phar` (PHPUnit 12) dans `tools/` avant le premier lancement.
+(prestashop, mysql, stripe-mock, mailpit). `./tools/get-phpunit.sh` dépose `phpunit.phar` (PHPUnit 12) dans `tools/`
+avant le premier lancement. Version de PrestaShop du banc : variable `PS_IMAGE` (étiquette de l'image officielle,
+9.1.5 par défaut), sur un banc à part ou après `docker compose down -v` (voir le README du dépôt).
 
 ```sh
 docker compose -p bench-ucp-bridge up -d

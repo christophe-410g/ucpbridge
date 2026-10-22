@@ -21,9 +21,10 @@ C="$UCP_PROJECT-prestashop-1"
 docker compose -p "$UCP_PROJECT" up -d mysql prestashop stripe-mock mailpit >/dev/null 2>&1
 
 # Premier démarrage : l'image installe PrestaShop avant de lancer Apache (plusieurs minutes).
+# Redirections suivies : PrestaShop 8 renvoie / vers /fr/ (302).
 ATTENTE=${UCP_WAIT:-900}
 DEBUT=$(date +%s)
-until [ "$(curl -s -o /dev/null -w '%{http_code}' "$UCP_BASE/" 2>/dev/null)" = "200" ]; do
+until [ "$(curl -sL -o /dev/null -w '%{http_code}' "$UCP_BASE/" 2>/dev/null)" = "200" ]; do
   if [ $(( $(date +%s) - DEBUT )) -ge "$ATTENTE" ]; then
     echo "boutique $UCP_BASE injoignable après ${ATTENTE} s"; docker logs --tail 30 "$C"; exit 1
   fi
@@ -46,7 +47,7 @@ mkdir -p test-logs
 echo "== Tests unitaires (PHPUnit, conteneur PrestaShop)"
 ./run-unit.sh > test-logs/unit.log 2>&1
 UNIT=$?
-grep -E "^(OK|Tests:|FAILURES|ERRORS)" test-logs/unit.log
+grep -E "^(OK|Tests:|FAILURES|ERRORS|Conteneur)" test-logs/unit.log
 
 echo "== Tests d'intégration (pytest, boutique $UCP_BASE)"
 if python3 -c "import pytest, playwright" 2>/dev/null; then
