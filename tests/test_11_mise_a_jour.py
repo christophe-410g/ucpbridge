@@ -19,7 +19,7 @@ import pytest
 from conftest import (BANC, BASE, CLIENT_ID, PS, appel, cle_api, config, id_commande, jeton_client, php, secret_client_test, set_config,
                       sql, sql_val)
 
-VERSION_PUBLIEE = "a6d66f9"  # 0.1.2-beta, première publication
+VERSION_PUBLIEE = "a6d66f9b16357c1c5301658b93a29ed61580f482"  # 0.1.2-beta, première publication
 TABLES_DONNEES = {
     "ps_ucpbridge_session": "id_session", "ps_ucpbridge_proof": "id_proof", "ps_ucpbridge_withdrawal": "id_order",
     "ps_ucpbridge_payment": "id_payment", "ps_ucpbridge_oauth_code": "code_hash", "ps_ucpbridge_oauth_token": "token_hash",
@@ -61,6 +61,21 @@ def contenu(table):
     return sql(f"SELECT * FROM {table} ORDER BY {TABLES_DONNEES[table]}")
 
 
+def version_publiee_disponible():
+    """Le commit de la 0.1.2 doit être dans le clone ; un clone superficiel (intégration continue) le récupère seul."""
+    if subprocess.run(["git", "-C", BANC, "cat-file", "-e", VERSION_PUBLIEE + "^{commit}"], capture_output=True).returncode != 0:
+        r = subprocess.run(["git", "-C", BANC, "fetch", "--quiet", "--depth", "1", "origin", VERSION_PUBLIEE], capture_output=True, text=True)
+        assert r.returncode == 0, "commit de la 0.1.2 introuvable (git fetch origin " + VERSION_PUBLIEE + ") : " + r.stderr
+
+
+def base_vierge():
+    """Module désinstallé et aucune table du module en base (même celles qu'une désinstallation conserve)."""
+    r = console("prestashop:module", "uninstall", "ucpbridge")
+    assert r.returncode == 0, r.stdout + r.stderr
+    for t in sql("SHOW TABLES LIKE 'ps\\_ucpbridge\\_%'").split():
+        sql(f"DROP TABLE {t}")
+
+
 def installer_sources(source):
     """Remplace les fichiers du module dans la boutique (sans le désinstaller) : source = 'git' (0.1.2) ou 'courant'."""
     conteneur("rm -rf /var/www/html/modules/ucpbridge")
@@ -85,12 +100,14 @@ def graine_012():
 @pytest.fixture(scope="module")
 def mise_a_jour(boutique, oauth_meta):
     """Installe la 0.1.2, y crée des données, puis met à jour vers les sources courantes. Renvoie le contexte."""
+    version_publiee_disponible()
+    # 0. Référence : installation fraîche des sources courantes sur une base vierge.
+    base_vierge()
+    r = console("prestashop:module", "install", "ucpbridge")
+    assert r.returncode == 0, r.stdout + r.stderr
     ctx = {"schema_frais": schema(), "config_fraiche": cles_config()}
     # 1. Boutique en 0.1.2 sur une base vierge (aucune table du module).
-    r = console("prestashop:module", "uninstall", "ucpbridge")
-    assert r.returncode == 0, r.stdout + r.stderr
-    for t in sql("SHOW TABLES LIKE 'ps\\_ucpbridge\\_%'").split():
-        sql(f"DROP TABLE {t}")
+    base_vierge()
     installer_sources("git")
     r = console("prestashop:module", "install", "ucpbridge")
     assert r.returncode == 0, r.stdout + r.stderr
