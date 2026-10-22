@@ -30,6 +30,8 @@ require_once __DIR__ . '/classes/cart/UcpBridgeCheckoutView.php';
 require_once __DIR__ . '/classes/cart/UcpBridgeCheckoutCompletion.php';
 require_once __DIR__ . '/classes/cart/UcpBridgeReconciler.php';
 require_once __DIR__ . '/classes/cart/UcpBridgeOrderView.php';
+require_once __DIR__ . '/classes/cart/UcpBridgeCartSession.php';
+require_once __DIR__ . '/classes/cart/UcpBridgeCheckoutSession.php';
 require_once __DIR__ . '/classes/UcpBridgeCart.php';
 require_once __DIR__ . '/classes/UcpBridgeIdempotency.php';
 require_once __DIR__ . '/classes/UcpBridgeApiKeys.php';
