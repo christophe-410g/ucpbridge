@@ -2,6 +2,15 @@
 
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 
+## 0.1.3-beta (non publiée)
+
+Corrections
+
+- Paiement (#2) : un débit réussi est mémorisé (`$this->charged`) dès la réponse du prestataire, avant toute
+  écriture au journal des paiements. Une erreur du journal (`ps_ucpbridge_payment`) n'interrompt plus la caisse :
+  la commande est créée, l'échec du journal est signalé au journal PrestaShop (gravité 3) avec la référence du débit,
+  et une exception ultérieure mène au remboursement automatique au lieu de faire croire que rien n'a été débité.
+
 ## 0.1.2-beta (2026-10-21) : première publication
 
 - Licence AFL-3.0 (Academic Free License 3.0). Titulaire des droits : Friends of Presta. Auteur : Christophe Vidal,
