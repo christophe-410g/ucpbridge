@@ -6,6 +6,10 @@ Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast
 
 Corrections
 
+- Paiement (#3) : la clé d'idempotence transmise au prestataire (`UcpBridgeIdempotency::chargeKey()`) inclut le
+  montant en centimes, la devise et un numéro de tentative (`charge_attempt`, incrémenté après chaque refus
+  définitif). Un panier modifié ou un nouvel essai avec la même carte après un refus n'est plus rejeté par Stripe
+  (paramètres différents) ni ne reçoit le refus mis en cache 24 h.
 - Paiement (#2) : un débit réussi est mémorisé (`$this->charged`) dès la réponse du prestataire, avant toute
   écriture au journal des paiements. Une erreur du journal (`ps_ucpbridge_payment`) n'interrompt plus la caisse :
   la commande est créée, l'échec du journal est signalé au journal PrestaShop (gravité 3) avec la référence du débit,
