@@ -77,7 +77,8 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   - `GET /.well-known/oauth-authorization-server` (RFC 8414), `/ucp/oauth/authorize`, `/ucp/oauth/token`,
     `/ucp/oauth/revoke` (RFC 7009).
   - Code d'autorisation, **PKCE S256 obligatoire**, `redirect_uri` en correspondance exacte, `state` renvoyé, code à
-    usage unique 5 min (un code rejoué révoque les jetons déjà émis), scopes `dev.ucp.shopping.checkout:manage` et
+    usage unique 5 min (un code rejoué par son client révoque les jetons déjà émis ; présenté par un autre client, il
+    est refusé sans être consommé ni rien révoquer), scopes `dev.ucp.shopping.checkout:manage` et
     `dev.ucp.shopping.order:read` présentés en un seul consentement.
   - Clients enregistrés en configuration (`UCPBRIDGE_OAUTH_CLIENTS`, secret stocké haché SHA-256) ; authentification
     `client_secret_basic` (et `client_secret_post`). `private_key_jwt`, recommandé par Google, n'est pas implémenté.

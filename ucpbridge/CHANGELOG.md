@@ -6,6 +6,9 @@ Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast
 
 Corrections
 
+- OAuth (#4) : `redeemCode()` vérifie que le client authentifié est le propriétaire du code AVANT de le marquer
+  utilisé. Un autre client enregistré qui détient le code reçoit `invalid_grant` (« Code inconnu »), sans brûler le
+  code ni déclencher la révocation des jetons de son propriétaire ; le rejeu par le propriétaire révoque toujours.
 - Paiement (#3) : la clé d'idempotence transmise au prestataire (`UcpBridgeIdempotency::chargeKey()`) inclut le
   montant en centimes, la devise et un numéro de tentative (`charge_attempt`, incrémenté après chaque refus
   définitif). Un panier modifié ou un nouvel essai avec la même carte après un refus n'est plus rejeté par Stripe
