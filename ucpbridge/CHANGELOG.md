@@ -6,6 +6,12 @@ Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast
 
 Corrections
 
+- API (#5) : une clé API par plateforme en mode invité (`UcpBridgeApiKeys`, configuration `UCPBRIDGE_API_KEYS`).
+  L'identifiant de la plateforme entre dans l'identité de l'appelant (`platform:<id>`) : paniers, sessions de caisse,
+  commandes et clés d'idempotence sont cloisonnés entre plateformes. Configuration du module : ajout, régénération et
+  suppression des clés, sous jeton anti-CSRF. La clé unique `UCPBRIDGE_API_KEY` est migrée à la première lecture vers
+  la plateforme `default`, qui garde l'identité `platform` (sessions en cours conservées). Le commentaire qui
+  promettait ce cloisonnement sans le fournir est corrigé.
 - OAuth (#4) : `redeemCode()` vérifie que le client authentifié est le propriétaire du code AVANT de le marquer
   utilisé. Un autre client enregistré qui détient le code reçoit `invalid_grant` (« Code inconnu »), sans brûler le
   code ni déclencher la révocation des jetons de son propriétaire ; le rejeu par le propriétaire révoque toujours.

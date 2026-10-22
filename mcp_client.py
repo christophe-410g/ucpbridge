@@ -112,13 +112,13 @@ def scenario(client, sortie=print):
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--url", default="http://localhost:8092/ucp/v1/mcp")
-    a.add_argument("--token", default=None, help="clé API UCPBRIDGE_API_KEY (lue en base du banc si absente)")
+    a.add_argument("--token", default=None, help="clé API de la plateforme par défaut (lue en base du banc si absente)")
     a = a.parse_args()
     if not a.url.startswith(("http://localhost", "http://127.0.0.1", "https://")):
         sys.exit("URL locale ou HTTPS attendue")
-    jeton = a.token or subprocess.run(["docker", "exec", "bench-ucp-bridge-mysql-1", "mysql", "-uroot", "-pbench", "-N", "-B", "prestashop",
-                                       "-e", "SELECT value FROM ps_configuration WHERE name='UCPBRIDGE_API_KEY'"],
-                                      capture_output=True, text=True).stdout.strip().splitlines()[-1]
+    jeton = a.token or json.loads(subprocess.run(["docker", "exec", "bench-ucp-bridge-mysql-1", "mysql", "-uroot", "-pbench", "-N", "-B", "prestashop",
+                                                  "-e", "SELECT value FROM ps_configuration WHERE name='UCPBRIDGE_API_KEYS'"],
+                                                 capture_output=True, text=True).stdout.strip().splitlines()[-1])["default"]["key"]
     scenario(ClientMcp(a.url, jeton))
 
 
