@@ -368,8 +368,8 @@ Compatibilité et code
   antérieure se désinstalle puis s'installe.
 - Concurrence entre le lien de reprise et une mise à jour : si l'acheteur ouvre le lien pendant qu'une mise à jour de
   l'agent est en cours (fraction de seconde), le lien est refusé avec « réessayez dans quelques secondes ».
-- Back-office et fiche commande en HTML construit à la main (pas de `HelperForm` ni de gabarits Smarty) ;
-  `UcpBridgeCart` concentre encore panier, caisse, client, paiement, preuve et commande.
+- Configuration du module en `HelperForm` (formulaires « legacy » de PrestaShop), pas en formulaires Symfony : le
+  passage à une page Symfony attendra que le module n'ait plus à couvrir qu'une seule génération de PrestaShop.
 - Lecture du profil de l'agent (`UCP-Agent`) : volontairement aucun appel sortant, l'en-tête est seulement consigné.
 
 ## Installation
@@ -422,7 +422,7 @@ Modules > UCP Bridge pour PrestaShop (formulaire protégé par un jeton anti-CSR
 - accès agents actifs (assistant, client, date de liaison, échéance), avec révocation ;
 - rapprochement des sessions bloquées (bouton, seuil en minutes), voir plus haut ;
 - journal de preuve et rétractations : nombre d'enregistrements, export CSV (bouton « Exporter les preuves et
-  rétractations », jeton anti-CSRF du module) ; option de suppression à la désinstallation (décochée par défaut).
+  rétractations », jeton anti-CSRF du module) ; option de suppression à la désinstallation (« Non » par défaut).
   Format du fichier `ucpbridge-preuves-AAAAMMJJ-HHMMSS.csv` : UTF-8 avec BOM, séparateur `;`, fins de ligne CRLF, une
   ligne par commande (preuve et rétractation éventuelle) puis les rétractations sans preuve ; colonnes `id_commande`,
   `reference_commande`, `date_preuve`, `session`, `agent_ucp`, `appelant`, `ip_appel_api`, `user_agent_appel_api`,
@@ -490,19 +490,32 @@ python3 mcp_client.py   # client MCP minimal : « t-shirt colibri taille M » ju
   durées par défaut, invité sans commande purgé avec adresse, panier et session, invité qui a commandé jamais purgé
   (session gardée sans données personnelles, commande relue), session en cours jamais touchée, codes, jetons,
   paiements, preuves et rétractations selon leur durée, durée 0, simulation, back-office (jeton, durée invalide),
-  adresse orpheline, commandes de la boutique inchangées après chaque purge.
+  adresse orpheline, commandes de la boutique inchangées après chaque purge ; configuration depuis le navigateur
+  (`tests/test_14_back_office.py`) : chaque réglage enregistré et réaffiché, clé Stripe conservée ou effacée,
+  plateformes, durées, simulation de purge, rapprochement, révocation d'un accès agent, jeton anti-CSRF faux refusé.
 
 ## Architecture
 
 ```
-ucpbridge.php                 module (PaymentModule pour validateOrder), installation, hooks, liens signés, configuration
+ucpbridge.php                 module (PaymentModule pour validateOrder), installation, hooks, liens signés
+classes/admin/UcpBridgeConfigPage.php page de configuration : formulaires HelperForm, traitement, jeton anti-CSRF
+views/templates/admin/        gabarits Smarty de la configuration (plateformes, accès agents, preuves, comptes rendus)
+views/templates/hook/         bloc de preuve de la fiche commande, lien « Mes accès agents » du compte client
 controllers/front/api.php     REST /ucp/v1/* et MCP /ucp/v1/mcp : authentification, idempotence, routage (dispatch commun)
 controllers/front/handoff.php continue_url du panier : rattache le panier au visiteur
 controllers/front/terms.php   relecture et acceptation des CGV (requires_buyer_review)
 controllers/front/withdraw.php rétractation en ligne et accusé de réception
 controllers/front/oauth.php   serveur d'autorisation OAuth 2.0 (identity linking)
 controllers/front/access.php  « Mes accès agents » : liste et révocation des assistants reliés (compte client)
-classes/UcpBridgeCart.php     coeur métier : panier, caisse, commande, consentements, journal de preuve
+classes/UcpBridgeCart.php     façade du coeur métier (panier, caisse, commande) : assemble et délègue à classes/cart/
+classes/cart/UcpBridgeCaller.php, UcpBridgeSessionStore.php   appelant ; sessions, statuts, réservation atomique
+classes/cart/UcpBridgeCartLines.php, UcpBridgeBuyer.php, UcpBridgeFulfillment.php   lignes et panier PrestaShop ;
+                              acheteur, invité, consentements ; adresse et transporteurs
+classes/cart/UcpBridgeCartSession.php, UcpBridgeCheckoutSession.php   panier transférable ; session de caisse
+classes/cart/UcpBridgeCheckoutStatus.php, UcpBridgeCheckoutView.php, UcpBridgeOrderView.php   statut ; documents UCP
+classes/cart/UcpBridgeCheckoutCompletion.php   finalisation : débit, commande, journaux des paiements et de preuve
+classes/cart/UcpBridgeReconciler.php   rapprochement des sessions bloquées
+classes/cart/UcpBridgeMessage.php   messages et enveloppes UCP (logique pure)
 classes/UcpBridgeCatalog.php  résolution des articles et déclinaisons, prix, stock, recherche
 classes/UcpBridgeDiscount.php codes promo sur les règles panier PrestaShop
 classes/UcpBridgeMcp.php      JSON-RPC 2.0 / MCP, traduit chaque outil vers la route REST (logique pure)

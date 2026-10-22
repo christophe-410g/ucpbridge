@@ -46,6 +46,23 @@ Nouveautés
   attendu au chargement et non plus au repos réseau, que le tableau de bord 9.2 n'atteint jamais) ; conteneur
   PrestaShop relancé s'il s'arrête en erreur (l'image 9.2.0 échoue juste après une installation réussie). Intégration
   continue : lint sous PHP 8.1 et matrice d'intégration d'une version par branche mineure.
+- Back-office aux standards PrestaShop (#17) : la page de configuration (`UcpBridgeConfigPage`) est faite de
+  formulaires `HelperForm` (réglages, ajout d'une plateforme, durées de conservation, purge, rapprochement) et de
+  gabarits Smarty pour les listes (`views/templates/admin/` : plateformes et clés, accès agents, preuves et export) ;
+  le bloc de preuve de la fiche commande et le lien « Mes accès agents » du compte client passent aussi par des
+  gabarits (`views/templates/hook/`). Fonctions, noms de champs, boutons et jeton anti-CSRF du module (`ucp_csrf`)
+  inchangés ; chaque formulaire est un formulaire HTML distinct. Les cases à cocher deviennent des interrupteurs
+  oui/non (mêmes valeurs envoyées).
+- Découpage de `UcpBridgeCart` (#17), sans changement de comportement ni de l'API UCP : `UcpBridgeCart` devient la
+  façade qui assemble les classes de `classes/cart/` et garde son API publique et ses constantes.
+  `UcpBridgeCaller` (appelant), `UcpBridgeSessionStore` (sessions, statuts, réservation atomique),
+  `UcpBridgeMessage` (messages et enveloppes UCP, logique pure), `UcpBridgeCartLines` (lignes et panier PrestaShop),
+  `UcpBridgeBuyer` (acheteur, invité, consentements), `UcpBridgeFulfillment` (adresse, transporteurs),
+  `UcpBridgeCartSession` (panier transférable), `UcpBridgeCheckoutSession` (création et mise à jour de la caisse,
+  CGV, annulation), `UcpBridgeCheckoutStatus` (manques, statut), `UcpBridgeCheckoutView` (document checkout),
+  `UcpBridgeCheckoutCompletion` (finalisation, débit, commande, journaux), `UcpBridgeReconciler` (rapprochement),
+  `UcpBridgeOrderView` (document de commande). Tests : `MessageTest` (unitaire), `tests/test_14_back_office.py`
+  (chaque fonction de la configuration depuis le navigateur).
 
 Corrections
 

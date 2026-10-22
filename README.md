@@ -18,7 +18,7 @@ l'association **Friends of Presta**.
 - `ucpbridge/` : le module (à zipper pour l'installer, voir `build-zip.sh`), sa documentation complète
   (`ucpbridge/README.md`) et son journal des modifications.
 - `tests/`, `run-tests.sh`, `docker-compose.yml`, `seed-demo.php` : banc d'essai docker (PrestaShop 9.1.5 par défaut,
-  toute version de 8.0 à 9.2 par `PS_IMAGE`) et 202 tests (91 unitaires PHPUnit, 111 d'intégration pytest et
+  toute version de 8.0 à 9.2 par `PS_IMAGE`) et 211 tests (95 unitaires PHPUnit, 116 d'intégration pytest et
   Playwright).
 - `mcp_client.py` : client MCP minimal pour essayer la boutique comme un agent.
 

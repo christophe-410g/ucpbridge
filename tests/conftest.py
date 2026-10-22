@@ -70,7 +70,9 @@ NOYAU_PHP = ("if (is_file('/var/www/html/app/AdminKernel.php')) { require_once '
 
 def php(code):
     """Exécute du PHP dans le conteneur de la boutique, PrestaShop chargé."""
-    script = "<?php define('_PS_ADMIN_DIR_', '/var/www/html/admin'); require '/var/www/html/config/config.inc.php';\n" + code
+    # Vrai dossier d'administration : le back-office (HelperForm) y trouve les gabarits du thème d'administration.
+    script = (f"<?php define('_PS_ADMIN_DIR_', '/var/www/html/{admin_dir()}'); require '/var/www/html/config/config.inc.php';\n"
+              + code)
     r = subprocess.run(["docker", "exec", "-i", "-u", "www-data", PS, "php"], input=script, capture_output=True, text=True)
     return r.stdout.strip()
 
@@ -278,9 +280,19 @@ def set_config(nom, valeur):
     php(f"Configuration::updateValue({json.dumps(nom)}, {json.dumps(str(valeur))});")
 
 
+_ADMIN_DIR = []
+
+
 def admin_dir():
+    """Dossier d'administration, relu tant qu'il s'appelle encore « admin » : PrestaShop 8 le renomme (admin + suffixe
+    aléatoire) à la première ouverture de la page de connexion. Le nom définitif est ensuite gardé en mémoire."""
+    if _ADMIN_DIR:
+        return _ADMIN_DIR[0]
     r = subprocess.run(["docker", "exec", PS, "sh", "-c", "ls -d /var/www/html/admin* | grep -v admin-api"], capture_output=True, text=True)
-    return os.path.basename(r.stdout.strip())
+    nom = os.path.basename(r.stdout.strip())
+    if nom != "admin":
+        _ADMIN_DIR.append(nom)
+    return nom
 
 
 def admin_login(page):
