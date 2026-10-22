@@ -99,10 +99,12 @@ class UcpBridgeConfigPage
             return $this->module->displayError('Jeton de sécurité invalide : clés API inchangées.');
         }
         $id = (string) Tools::getValue('api_key_id');
+        // Identifiant reçu en POST, affiché dans un message que displayConfirmation() n'échappe pas.
+        $shown = htmlspecialchars($id, ENT_QUOTES, 'UTF-8');
         if (Tools::isSubmit('submitUcpbridgeApiKeyDelete')) {
             UcpBridgeApiKeys::remove($id);
 
-            return $this->module->displayConfirmation('Clé de la plateforme « ' . $id . ' » supprimée : elle est refusée dès maintenant.');
+            return $this->module->displayConfirmation('Clé de la plateforme « ' . $shown . ' » supprimée : elle est refusée dès maintenant.');
         }
         $key = Tools::isSubmit('submitUcpbridgeApiKeyAdd')
             ? UcpBridgeApiKeys::add($id, (string) Tools::getValue('api_key_label'))
@@ -111,7 +113,8 @@ class UcpBridgeConfigPage
             return $this->module->displayError('Identifiant de plateforme invalide ou déjà utilisé (minuscules, chiffres, - et _, 32 caractères au plus).');
         }
 
-        return $this->module->displayConfirmation('Clé de la plateforme « ' . $id . ' » : ' . $key . ' (à transmettre à cette plateforme seulement)');
+        return $this->module->displayConfirmation('Clé de la plateforme « ' . $shown . ' » : ' . htmlspecialchars($key, ENT_QUOTES, 'UTF-8')
+            . ' (à transmettre à cette plateforme seulement)');
     }
 
     /** Enregistrement des durées, simulation ou purge. */

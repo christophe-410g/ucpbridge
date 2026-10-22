@@ -46,7 +46,8 @@ Nouveautés
   le bloc de preuve de la fiche commande et le lien « Mes accès agents » du compte client passent aussi par des
   gabarits (`views/templates/hook/`). Fonctions, noms de champs, boutons et jeton anti-CSRF du module (`ucp_csrf`)
   inchangés ; chaque formulaire est un formulaire HTML distinct. Les cases à cocher deviennent des interrupteurs
-  oui/non (mêmes valeurs envoyées).
+  oui/non (mêmes valeurs envoyées). L'identifiant de plateforme reçu en POST est échappé dans les messages de
+  confirmation (il ne l'était pas depuis la 0.1.2).
 - Découpage de `UcpBridgeCart` (#17), sans changement de comportement ni de l'API UCP : `UcpBridgeCart` devient la
   façade qui assemble les classes de `classes/cart/` et garde son API publique et ses constantes.
   `UcpBridgeCaller` (appelant), `UcpBridgeSessionStore` (sessions, statuts, réservation atomique),
