@@ -64,7 +64,7 @@ def reinstallation():
 def back_office(post=None):
     code = "Context::getContext()->employee = new Employee(1); $m = Module::getInstanceByName('ucpbridge');\n"
     if post is not None:
-        code += ("$h = $m->getContent(); preg_match('/name=\"ucp_csrf\" value=\"([0-9a-f]+)\"/', $h, $t);\n"
+        code += ("$h = $m->getContent(); preg_match('/name=\"ucp_csrf\"[^>]*value=\"([0-9a-f]+)\"/', $h, $t);\n"
                  f"$_POST = json_decode({json.dumps(json.dumps(post))}, true);\n"
                  "if (($_POST['ucp_csrf'] ?? '') === 'JETON') { $_POST['ucp_csrf'] = $t[1]; }\n")
     return php(code + "echo $m->getContent();")

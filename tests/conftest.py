@@ -3,6 +3,7 @@
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 """
 import base64
+import functools
 import hashlib
 import http.server
 import json
@@ -64,7 +65,9 @@ def cle_api(plateforme="default"):
 
 def php(code):
     """Exécute du PHP dans le conteneur de la boutique, PrestaShop chargé."""
-    script = "<?php define('_PS_ADMIN_DIR_', '/var/www/html/admin'); require '/var/www/html/config/config.inc.php';\n" + code
+    # Vrai dossier d'administration : le back-office (HelperForm) y trouve les gabarits du thème d'administration.
+    script = (f"<?php define('_PS_ADMIN_DIR_', '/var/www/html/{admin_dir()}'); require '/var/www/html/config/config.inc.php';\n"
+              + code)
     r = subprocess.run(["docker", "exec", "-i", "-u", "www-data", PS, "php"], input=script, capture_output=True, text=True)
     return r.stdout.strip()
 
@@ -272,6 +275,7 @@ def set_config(nom, valeur):
     php(f"Configuration::updateValue({json.dumps(nom)}, {json.dumps(str(valeur))});")
 
 
+@functools.lru_cache(maxsize=None)
 def admin_dir():
     r = subprocess.run(["docker", "exec", PS, "sh", "-c", "ls -d /var/www/html/admin* | grep -v admin-api"], capture_output=True, text=True)
     return os.path.basename(r.stdout.strip())
