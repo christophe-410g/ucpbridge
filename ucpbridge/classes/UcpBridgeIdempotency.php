@@ -43,6 +43,20 @@ class UcpBridgeIdempotency
     }
 
     /**
+     * Clé d'idempotence transmise au prestataire pour un débit : session, numéro de tentative, puis empreinte de
+     * l'instrument, du montant (centimes) et de la devise. Un panier modifié (autre montant) ou un nouvel essai après
+     * un refus définitif (tentative suivante) produit une autre clé : le prestataire ne rejoue jamais un refus mis en
+     * cache ni ne rejette la requête pour paramètres différents. Le même essai rejoué (même tentative, même montant)
+     * garde la même clé : aucun double débit.
+     */
+    public static function chargeKey($sessionId, array $instrument, $cents, $currency, $attempt = 0)
+    {
+        $print = hash('sha256', json_encode([$instrument, (int) $cents, strtoupper((string) $currency)], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return (string) $sessionId . '-' . max(0, (int) $attempt) . '-' . substr($print, 0, 16);
+    }
+
+    /**
      * Réserve la clé. Retourne null si la requête doit être exécutée,
      * sinon [code HTTP, corps] à renvoyer tel quel (rejeu ou conflit).
      */
