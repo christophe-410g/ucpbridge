@@ -26,8 +26,25 @@ configuration du module. C'est ce qu'il vous faut en cas de litige avec un clien
 
 **Le RGPD pris en charge.** Vous choisissez combien de temps garder chaque catégorie de données (paniers abandonnés,
 comptes invités, connexions des agents, paiements, preuves). Un bouton « Simuler la purge » montre ce qui serait
-supprimé avant de le faire, un autre purge pour de bon, et une commande peut être planifiée sur le serveur. Aucune
-commande de votre boutique n'est jamais touchée, et un client qui a commandé n'est jamais supprimé.
+supprimé avant de le faire, un autre purge pour de bon, et une commande peut être planifiée sur le serveur.
+
+Ce que la purge garantit :
+
+- aucune commande de votre boutique n'est jamais touchée, ni son client, ni ses adresses : un client qui a commandé
+  n'est jamais supprimé ;
+- un acheteur débité sans que sa commande ait pu être créée, et pas encore remboursé (ou dont le débit est
+  incertain), reste dans la boutique avec sa session aussi longtemps que le journal des paiements : 10 ans par
+  défaut. Vous savez toujours qui rembourser ;
+- les pièces que la loi impose de garder 10 ans (journal des paiements, preuves d'acceptation des CGV, demandes de
+  rétractation) ne peuvent pas être réglées en dessous de 3650 jours : une faute de frappe (365 au lieu de 3650) est
+  refusée avec un message clair. 0 (ne jamais purger) reste possible. Si une durée plus courte se retrouve malgré
+  tout dans la configuration, la purge refuse de tourner et ne supprime rien ;
+- une session en cours de paiement n'est jamais touchée, et le panier abandonné d'un client avec compte reste à la
+  boutique ;
+- la simulation annonce exactement ce que la purge supprime, et le compte rendu (aussi consigné au journal
+  PrestaShop) compte tout ce qui part, y compris les paniers et adresses d'un invité supprimé ;
+- la purge reste légère sur une grosse boutique : les sessions sont lues par lots, sans relire chaque nuit celles qui
+  sont déjà nettoyées.
 
 **Une configuration qui ressemble à PrestaShop.** La page de configuration reprend les formulaires standards du
 back-office : mêmes fonctions qu'avant, présentation familière, interrupteurs oui/non à la place des cases à cocher.
@@ -79,7 +96,9 @@ Scripts `upgrade/upgrade-X.Y.Z.php` à partir de la 0.1.2, lancés par le gestio
 `php bin/console prestashop:module upgrade ucpbridge`. `Ucpbridge::upgradeInPlace()` crée tables, colonnes
 (`Ucpbridge::ADDED_COLUMNS`), hooks et clés de configuration manquants sans modifier aucune valeur existante ; il est
 rejouable. La clé unique `UCPBRIDGE_API_KEY` est migrée vers la plateforme `default` de `UCPBRIDGE_API_KEYS`. Le test
-de mise à jour compare le schéma obtenu à celui d'une installation fraîche.
+de mise à jour compare le schéma obtenu à celui d'une installation fraîche. L'ancienne clé n'est supprimée qu'après
+l'enregistrement réussi de la nouvelle liste (`UcpBridgeApiKeys::migrateLegacy()`) ; si l'écriture échoue, la
+mise à jour échoue et la plateforme en place garde son accès.
 
 ### Désinstallation et export (#12)
 
@@ -95,10 +114,22 @@ Durées par catégorie : `UCPBRIDGE_RETENTION_SESSIONS`, `_GUESTS`, `_OAUTH` (30
 la configuration, avec compte rendu par catégorie consigné au journal PrestaShop. Nouvelle table
 `ps_ucpbridge_customer` (invités créés par le module).
 
+- Planchers légaux : `UcpBridgeRetention::LEGAL_MIN_DAYS` (`payments` et `proofs` : 3650 jours, 0 toujours permis).
+  Durée plus courte refusée à l'enregistrement ; si la configuration est en dessous (écrite par un autre moyen), la
+  purge est refusée sans rien supprimer : message d'erreur au back-office, `bin/purge.php` sort en code 2 avec le code
+  `[retention_too_short]`.
+- Session `failed` (débit non remboursé, adaptateur introuvable, débit incertain) : supprimée seulement avec le
+  journal des paiements ; l'invité qui en a une n'est pas purgé (il le redevient ensuite, s'il n'a aucune commande).
+- « Aucune commande » vérifié avant toute suppression des sessions d'un invité.
+- Sessions lues par lots (`UcpBridgePurge::BATCH` = 500, pagination par identifiant), sessions déjà minimisées
+  écartées en SQL.
+- Compte rendu exact : paniers et adresses supprimés avec un invité comptés, simulation identique à la purge.
+
 ### Back-office et découpage (#17)
 
 Configuration en `HelperForm` et gabarits Smarty (`views/templates/admin/`, `views/templates/hook/`), noms de champs,
-boutons et jeton anti-CSRF `ucp_csrf` inchangés. `UcpBridgeCart` devient une façade, API publique et constantes
+boutons et jeton anti-CSRF `ucp_csrf` inchangés. Identifiant de plateforme reçu en POST échappé dans les messages de
+confirmation. `UcpBridgeCart` devient une façade, API publique et constantes
 conservées, sur les classes de `classes/cart/` (`UcpBridgeSessionStore`, `UcpBridgeCartLines`, `UcpBridgeBuyer`,
 `UcpBridgeFulfillment`, `UcpBridgeCheckoutSession`, `UcpBridgeCheckoutCompletion`, `UcpBridgeReconciler`, etc.). Un
 module tiers qui appelle `UcpBridgeCart` n'a rien à changer.
