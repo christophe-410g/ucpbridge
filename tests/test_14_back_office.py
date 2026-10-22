@@ -31,8 +31,9 @@ def cocher(page, nom, valeur):
 
 def soumettre(page, bouton, formulaire=None):
     zone = page.locator(formulaire) if formulaire else page
-    zone.locator(f"button[name={bouton}]").first.click()
-    page.wait_for_load_state("networkidle")
+    # Attente du rechargement, pas du repos réseau : certains tableaux de bord interrogent le serveur en continu.
+    with page.expect_navigation(wait_until="load"):
+        zone.locator(f"button[name={bouton}]").first.click()
     page.wait_for_selector("input[name=ucp_csrf]", state="attached")
 
 
