@@ -11,8 +11,8 @@ Nouveautés
   `Ucpbridge::upgradeInPlace()` : tables, colonnes (`Ucpbridge::ADDED_COLUMNS`), hooks et clés de configuration
   manquants créés, lignes et valeurs existantes intactes (clé API, secret des liens signés, clients OAuth), règles
   `.htaccess` réinsérées ; rejouable. Nouvelle classe `UcpBridgeSchema`. La configuration d'installation est décrite
-  une seule fois (`configDefaults()`), pour l'installation comme pour la mise à jour. Tables de la 0.1.2 et de la
-  0.1.3 identiques : les corrections #1 à #4 n'ajoutent que des clés au JSON `payload` des sessions
+  une seule fois (`configDefaults()`), pour l'installation comme pour la mise à jour. Les corrections #1 à #4 ne
+  changent aucune table : elles n'ajoutent que des clés au JSON `payload` des sessions
   (`charge_attempt`, `charge_unknown`), lues avec une valeur par défaut. Configuration : la clé unique
   `UCPBRIDGE_API_KEY` (#5) est migrée vers la plateforme `default` de `UCPBRIDGE_API_KEYS` en tête de la mise à jour,
   avant la création des clés manquantes (sinon une clé neuve aurait pris sa place). Version du module : 0.1.3.
@@ -23,6 +23,16 @@ Nouveautés
   (`UCPBRIDGE_UNINSTALL_PURGE`, 0 par défaut, effacée avec la configuration). Export CSV des preuves et rétractations
   depuis la configuration (`UcpBridgeExport`, jeton anti-CSRF du module) : UTF-8 avec BOM, séparateur `;`, une ligne
   par commande, champs JSON tels qu'enregistrés, valeurs commençant par `=`, `+`, `-` ou `@` neutralisées.
+- RGPD (#13) : durées de conservation configurables par catégorie (`UCPBRIDGE_RETENTION_SESSIONS` 30 j,
+  `_GUESTS` 30 j, `_OAUTH` 30 j, `_PAYMENTS` 3650 j, `_PROOFS` 3650 j ; 0 = jamais) et purge (`UcpBridgePurge`) en
+  ligne de commande (`bin/purge.php`, `--dry-run`) et depuis la configuration (« Simuler la purge », « Purger
+  maintenant »), avec compte rendu par catégorie, aussi consigné au journal PrestaShop. Sessions et paniers terminés ou
+  expirés supprimés avec leur panier PrestaShop sans commande et leur adresse sans client ; sessions terminées par une
+  commande gardées sans les données personnelles de l'acheteur ; clients invités créés par le module et sans aucune
+  commande supprimés, ceux qui ont commandé jamais ; codes et jetons OAuth expirés ou révoqués ; journal des paiements,
+  preuves et rétractations après 10 ans ; clés d'idempotence de plus de 24 h. Aucune commande touchée. Nouvelle table
+  `ps_ucpbridge_customer` (invités créés par le module, renseignée à la création de l'invité, reprise depuis les
+  sessions à la mise à jour depuis la 0.1.2, conservée à la désinstallation avec les preuves).
 
 Corrections
 

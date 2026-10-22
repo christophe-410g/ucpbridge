@@ -27,6 +27,8 @@ require_once __DIR__ . '/classes/UcpBridgeDiscount.php';
 require_once __DIR__ . '/classes/UcpBridgeOAuth.php';
 require_once __DIR__ . '/classes/UcpBridgeProof.php';
 require_once __DIR__ . '/classes/UcpBridgeExport.php';
+require_once __DIR__ . '/classes/UcpBridgeRetention.php';
+require_once __DIR__ . '/classes/UcpBridgePurge.php';
 require_once __DIR__ . '/classes/UcpBridgePage.php';
 require_once __DIR__ . '/classes/UcpBridgeMcp.php';
 require_once __DIR__ . '/classes/payment/UcpBridgePaymentProvider.php';
@@ -53,7 +55,9 @@ class Ucpbridge extends PaymentModule
     ];
     const CONFIG_KEYS = ['UCPBRIDGE_API_KEY', 'UCPBRIDGE_API_KEYS', 'UCPBRIDGE_LINK_SECRET', 'UCPBRIDGE_MOCK_SECRET', 'UCPBRIDGE_STRIPE_KEY', 'UCPBRIDGE_STRIPE_PK',
         'UCPBRIDGE_STRIPE_API_BASE', 'UCPBRIDGE_GPAY_MERCHANT_ID', 'UCPBRIDGE_OAUTH_CLIENTS', 'UCPBRIDGE_TERMS_REVIEW',
-        'UCPBRIDGE_CMS_TERMS', 'UCPBRIDGE_CMS_PRIVACY', 'UCPBRIDGE_CMS_REFUND', 'UCPBRIDGE_CMS_SHIPPING', 'UCPBRIDGE_UNINSTALL_PURGE'];
+        'UCPBRIDGE_CMS_TERMS', 'UCPBRIDGE_CMS_PRIVACY', 'UCPBRIDGE_CMS_REFUND', 'UCPBRIDGE_CMS_SHIPPING', 'UCPBRIDGE_UNINSTALL_PURGE',
+        'UCPBRIDGE_RETENTION_SESSIONS', 'UCPBRIDGE_RETENTION_GUESTS', 'UCPBRIDGE_RETENTION_OAUTH', 'UCPBRIDGE_RETENTION_PAYMENTS',
+        'UCPBRIDGE_RETENTION_PROOFS'];
     const HOOKS = ['moduleRoutes', 'actionHtaccessCreate', 'displayAdminOrderMain', 'actionEmailAddAfterContent',
         'actionGetExtraMailTemplateVars', 'displayCustomerAccount'];
     /** Durée de validité du lien de rétractation envoyé par e-mail (le droit court 14 jours après la réception). */
@@ -116,6 +120,8 @@ class Ucpbridge extends PaymentModule
             && UcpBridgeOAuth::installDb()
             && UcpBridgeProof::installDb()
             && UcpBridgeSchema::addMissingColumns(self::ADDED_COLUMNS)
+            // Invités créés par une version antérieure (sessions encore en base) : repris pour la purge RGPD.
+            && UcpBridgePurge::backfillGuests()
             && UcpBridgeSchema::addMissingConfig($this->configDefaults())
             && $this->installHtaccess();
     }
@@ -130,6 +136,11 @@ class Ucpbridge extends PaymentModule
         }
         UcpBridgeOAuth::uninstallDb();
         UcpBridgeProof::uninstallDb($dropEvidence);
+        if ($dropEvidence) {
+            // Liste des invités créés par le module : gardée avec les preuves, pour que la purge les retrouve après une
+            // réinstallation (identifiants seulement, aucune donnée personnelle).
+            Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'ucpbridge_customer`');
+        }
         Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'ucpbridge_session`');
         Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'ucpbridge_idempotency`');
         $ok = parent::uninstall();
@@ -162,6 +173,14 @@ class Ucpbridge extends PaymentModule
             KEY `id_cart` (`id_cart`),
             KEY `id_order` (`id_order`),
             UNIQUE KEY `order_ref` (`order_ref`)
+        ) ENGINE={$e} DEFAULT CHARSET=utf8mb4");
+
+        // Clients invités créés par le module (purge RGPD des invités sans commande).
+        $ok = $ok && Db::getInstance()->execute("CREATE TABLE IF NOT EXISTS `{$p}ucpbridge_customer` (
+            `id_customer` INT UNSIGNED NOT NULL,
+            `date_add` DATETIME NOT NULL,
+            PRIMARY KEY (`id_customer`),
+            KEY `date_add` (`date_add`)
         ) ENGINE={$e} DEFAULT CHARSET=utf8mb4");
 
         return $ok && Db::getInstance()->execute("CREATE TABLE IF NOT EXISTS `{$p}ucpbridge_idempotency` (
@@ -200,7 +219,7 @@ class Ucpbridge extends PaymentModule
             'UCPBRIDGE_TERMS_REVIEW' => 0,
             // 1 = supprimer journal de preuve, rétractations et journal des paiements à la désinstallation (0 = conserver).
             'UCPBRIDGE_UNINSTALL_PURGE' => 0,
-        ];
+        ] + UcpBridgeRetention::defaults(); // durées de conservation (jours) par catégorie
         // Pages légales devinées depuis la boutique (CGV : la page des conditions du tunnel de commande).
         foreach (self::CMS_KEYS as $type => $key) {
             $defaults[$key] = function () use ($type) {
@@ -686,6 +705,67 @@ class Ucpbridge extends PaymentModule
         exit;
     }
 
+    /** Durées de conservation, simulation et purge RGPD, avec le compte rendu de la dernière action. */
+    private function retentionPanel(callable $esc)
+    {
+        $csrf = '<input type="hidden" name="ucp_csrf" value="' . $esc($this->configToken()) . '">';
+        $fields = '';
+        $days = UcpBridgePurge::durations();
+        foreach (UcpBridgeRetention::CATEGORIES as $cat => $c) {
+            $fields .= '<p><label>' . $esc($c[2]) . ' (jours, défaut ' . (int) $c[1] . ', 0 = jamais purgé)</label><br>'
+                . '<input type="number" min="0" max="' . UcpBridgeRetention::MAX_DAYS . '" class="form-control" style="width:140px" name="'
+                . $esc($c[0]) . '" value="' . (int) $days[$cat] . '"></p>';
+        }
+
+        return '<h4>Données personnelles : durées de conservation et purge (RGPD)</h4>'
+            . '<p>Jamais touchés : les commandes passées, leurs clients (y compris invités) et leurs adresses ; les sessions en cours '
+            . 'de finalisation. Une session terminée par une commande est conservée sans les données personnelles de l\'acheteur. '
+            . 'Seuls les clients invités créés par le module et sans aucune commande sont supprimés. À planifier (tâche cron, '
+            . 'quotidienne) : <code>php modules/ucpbridge/bin/purge.php</code> (<code>--dry-run</code> pour une simulation).</p>'
+            . '<form method="post">' . $csrf . $fields
+            . '<button class="btn btn-default" name="submitUcpbridgeRetention" value="1">Enregistrer les durées</button></form>'
+            . '<form method="post" class="form-inline" style="margin-top:8px">' . $csrf
+            . '<button class="btn btn-default" name="submitUcpbridgePurgeDry" value="1">Simuler la purge</button> '
+            . '<button class="btn btn-default" name="submitUcpbridgePurge" value="1" onclick="return confirm(\'Purger maintenant ?\')">'
+            . 'Purger maintenant</button></form>';
+    }
+
+    /** Enregistrement des durées, simulation ou purge (formulaires de retentionPanel). */
+    private function processRetention()
+    {
+        $actions = ['submitUcpbridgeRetention', 'submitUcpbridgePurge', 'submitUcpbridgePurgeDry'];
+        if (!array_filter($actions, [Tools::class, 'isSubmit'])) {
+            return '';
+        }
+        if (!hash_equals($this->configToken(), (string) Tools::getValue('ucp_csrf'))) {
+            return $this->displayError('Jeton de sécurité invalide : aucune modification.');
+        }
+        if (Tools::isSubmit('submitUcpbridgeRetention')) {
+            $values = [];
+            foreach (UcpBridgeRetention::CATEGORIES as $c) {
+                $v = UcpBridgeRetention::normalizeDays(Tools::getValue($c[0]));
+                if (null === $v) {
+                    return $this->displayError('Durée de conservation invalide (' . $c[2] . ') : un nombre entier de jours, de 0 à '
+                        . UcpBridgeRetention::MAX_DAYS . '. Aucune durée modifiée.');
+                }
+                $values[$c[0]] = $v;
+            }
+            foreach ($values as $k => $v) {
+                Configuration::updateValue($k, $v);
+            }
+
+            return $this->displayConfirmation('Durées de conservation enregistrées.');
+        }
+        $dry = Tools::isSubmit('submitUcpbridgePurgeDry');
+        $lines = '';
+        foreach (UcpBridgeRetention::summary((new UcpBridgePurge($dry))->run(), $dry) as $l) {
+            $lines .= '<li>' . htmlspecialchars($l, ENT_QUOTES, 'UTF-8') . '</li>';
+        }
+
+        return $this->displayConfirmation(($dry ? 'Simulation de la purge (rien n\'a été supprimé)' : 'Compte rendu de la purge') . ' :')
+            . '<ul id="ucpbridge-purge-report">' . $lines . '</ul>';
+    }
+
     /** Export des preuves et choix de conservation à la désinstallation. */
     private function evidencePanel(callable $esc)
     {
@@ -730,6 +810,7 @@ class Ucpbridge extends PaymentModule
             }
         }
         $out .= $this->processApiKeys();
+        $out .= $this->processRetention();
         if (Tools::isSubmit('submitUcpbridge')) {
             if (!hash_equals($this->configToken(), (string) Tools::getValue('ucp_csrf'))) {
                 $out .= $this->displayError('Jeton de sécurité invalide : configuration non enregistrée.');
@@ -801,7 +882,8 @@ class Ucpbridge extends PaymentModule
             . 'de rétractation et le journal des paiements à la prochaine désinstallation (irréversible : exporter d\'abord). '
             . 'Case décochée : ces données sont conservées et retrouvées à la réinstallation.</label></p>'
             . '<button class="btn btn-primary" name="submitUcpbridge" value="1">Enregistrer</button></form>'
-            . $this->apiKeysPanel($esc) . $this->grantsPanel($esc) . $this->evidencePanel($esc) . $this->reconcilePanel($esc) . '</div>';
+            . $this->apiKeysPanel($esc) . $this->grantsPanel($esc) . $this->evidencePanel($esc) . $this->retentionPanel($esc)
+            . $this->reconcilePanel($esc) . '</div>';
 
         return $out;
     }

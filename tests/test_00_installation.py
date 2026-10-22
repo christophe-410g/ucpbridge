@@ -7,8 +7,10 @@ import subprocess
 from conftest import BASE, PS, appel, cle_api, config, sql, sql_val
 
 TABLES = ["ucpbridge_session", "ucpbridge_idempotency", "ucpbridge_oauth_code", "ucpbridge_oauth_token",
-          "ucpbridge_proof", "ucpbridge_withdrawal", "ucpbridge_payment", "ucpbridge_oauth_revocation"]
-PREUVES = ["ucpbridge_proof", "ucpbridge_withdrawal", "ucpbridge_payment"]
+          "ucpbridge_proof", "ucpbridge_withdrawal", "ucpbridge_payment", "ucpbridge_oauth_revocation",
+          "ucpbridge_customer"]
+# Conservées à la désinstallation (#12), avec la liste des invités créés par le module (#13, purge RGPD).
+PREUVES = ["ucpbridge_proof", "ucpbridge_withdrawal", "ucpbridge_payment", "ucpbridge_customer"]
 HOOKS = ["moduleRoutes", "actionHtaccessCreate", "displayAdminOrderMain", "actionEmailAddAfterContent",
          "actionGetExtraMailTemplateVars", "displayCustomerAccount"]
 
