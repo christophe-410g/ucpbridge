@@ -1236,7 +1236,11 @@ class UcpBridgeCart
             'buyer' => $s['payload']['buyer'] ?? [],
             'continue_url' => $this->module->buildContinueUrl((int) $cart->id),
         ]);
-        UcpBridgeProof::payment($s['id_session'], $provider->getName(), 'charge', $pay->status, $pay->transactionId, $cents, $currency->iso_code, $pay->message);
+        if (UcpBridgePaymentResult::SUCCEEDED === $pay->status) {
+            // Débit mémorisé AVANT toute écriture : une erreur ensuite ne fait jamais croire à « rien de débité ».
+            $this->charged = ['transaction_id' => $pay->transactionId, 'amount' => $cents, 'currency' => $currency->iso_code];
+        }
+        $this->journalPayment($s['id_session'], $provider->getName(), 'charge', $pay->status, $pay->transactionId, $cents, $currency->iso_code, $pay->message);
         if (UcpBridgePaymentResult::REQUIRES_ACTION === $pay->status) {
             unset($s['payload']['charge_started_at']);
             $s['status'] = 'requires_escalation';
@@ -1256,7 +1260,7 @@ class UcpBridgeCart
 
             return [200, $this->checkoutDoc($s, [self::msg('payment_failed', $pay->message, 'recoverable', '$.payment.instruments[0].credential')])];
         }
-        $charged = $this->charged = ['transaction_id' => $pay->transactionId, 'amount' => $cents, 'currency' => $currency->iso_code];
+        $charged = $this->charged;
         $error = null;
         try {
             $this->module->validateOrder((int) $cart->id, (int) Configuration::get('PS_OS_PAYMENT'), $amount, $pay->label,
@@ -1340,7 +1344,7 @@ class UcpBridgeCart
             $refund = UcpBridgePaymentResult::fail($e->getMessage());
         }
         $ok = $refund && UcpBridgePaymentResult::SUCCEEDED === $refund->status;
-        UcpBridgeProof::payment($s['id_session'], $provider->getName(), 'refund', $ok ? 'succeeded' : 'failed',
+        $this->journalPayment($s['id_session'], $provider->getName(), 'refund', $ok ? 'succeeded' : 'failed',
             $refund ? $refund->transactionId : '', $charged['amount'], $charged['currency'], $refund ? $refund->message : '');
         PrestaShopLogger::addLog('ucpbridge incident (' . $origin . ') : session ' . $s['id_session'] . ', débit ' . $charged['transaction_id']
             . ' (' . $provider->getName() . ', ' . $charged['amount'] . ' centimes) réussi mais commande non créée : ' . $reason . ' ; remboursement '
@@ -1352,6 +1356,26 @@ class UcpBridgeCart
         $this->save($s, ['complete_in_progress', 'reconciling']);
 
         return [200, $this->checkoutDoc($s)];
+    }
+
+    /**
+     * Écriture au journal des paiements qui ne fait jamais échouer la caisse : un débit ou un remboursement a déjà eu
+     * lieu chez le prestataire, une erreur de base de données ne doit ni l'effacer ni interrompre la commande. L'échec
+     * est signalé au journal PrestaShop avec la référence de l'opération.
+     */
+    private function journalPayment($sessionId, $providerName, $operation, $status, $transactionId, $amount, $currency, $message = '')
+    {
+        $error = 'insertion refusée';
+        try {
+            if (UcpBridgeProof::payment($sessionId, $providerName, $operation, $status, $transactionId, $amount, $currency, $message)) {
+                return;
+            }
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
+        }
+        PrestaShopLogger::addLog('ucpbridge journal des paiements indisponible : session ' . $sessionId . ', ' . $operation . ' ' . $status
+            . ' ' . $transactionId . ' (' . $providerName . ', ' . (int) $amount . ' centimes ' . $currency . ') non journalisé : '
+            . substr(strip_tags((string) $error), 0, 300), 3);
     }
 
     /* ========================== Rapprochement des sessions bloquées ========================== */

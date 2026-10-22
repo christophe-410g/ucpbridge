@@ -59,7 +59,8 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   débiter sans réponse exploitable : délai dépassé, connexion coupée, erreur 5xx), et `refund($transactionId, $amount, $currency,
   $context)`, appelée automatiquement si la commande ne peut pas être créée après un débit réussi.
   Chaque débit et chaque remboursement est consigné dans `ps_ucpbridge_payment` (session, adaptateur, opération,
-  statut, référence, montant).
+  statut, référence, montant). Une écriture impossible dans ce journal n'interrompt jamais la caisse (le débit est
+  mémorisé avant) : elle est signalée au journal PrestaShop (gravité 3) avec la référence de l'opération.
   - `fr.410gone.ucpbridge.mock` : paiement de test, actif seulement si un secret de simulation est configuré
     (référence `mock_...` propre à chaque débit, remboursement simulé).
   - `com.google.pay` version `2026-01-23` (adaptateur Stripe) : `environment: TEST`, `merchant_info`
