@@ -2,6 +2,15 @@
 
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 
+## 0.1.3-beta (non publiée)
+
+Corrections
+
+- Paiement (#3) : la clé d'idempotence transmise au prestataire (`UcpBridgeIdempotency::chargeKey()`) inclut le
+  montant en centimes, la devise et un numéro de tentative (`charge_attempt`, incrémenté après chaque refus
+  définitif). Un panier modifié ou un nouvel essai avec la même carte après un refus n'est plus rejeté par Stripe
+  (paramètres différents) ni ne reçoit le refus mis en cache 24 h.
+
 ## 0.1.2-beta (2026-10-21) : première publication
 
 - Licence AFL-3.0 (Academic Free License 3.0). Titulaire des droits : Friends of Presta. Auteur : Christophe Vidal,

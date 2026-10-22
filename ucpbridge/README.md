@@ -65,7 +65,9 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
     (`merchant_id` de test configurable), `allowed_payment_methods` CARD, `tokenization_specification`
     `PAYMENT_GATEWAY` gateway `stripe` (`stripe:version`, `stripe:publishableKey`). L'agent renvoie
     `credential: {type: PAYMENT_GATEWAY, token: "<jeton Stripe sérialisé en JSON par Google Pay>"}` ; l'adaptateur en
-    extrait l'id `tok_...` et débite par l'API Charges (`source`), `Idempotency-Key` transmise à Stripe, montant
+    extrait l'id `tok_...` et débite par l'API Charges (`source`), `Idempotency-Key` transmise à Stripe (session,
+    numéro de tentative, empreinte de l'instrument, du montant et de la devise : un panier modifié ou un nouvel essai
+    après un refus part avec une nouvelle clé), montant
     vérifié au retour ; remboursement par l'API Refunds. URL de base `https://api.stripe.com` par défaut, modifiable
     par script uniquement (banc d'essai), pas depuis le back-office. **Clés live refusées** : le gestionnaire n'est
     annoncé qu'avec une clé `sk_test_`.

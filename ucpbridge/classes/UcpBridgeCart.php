@@ -1196,7 +1196,7 @@ class UcpBridgeCart
         $presented = $this->checkoutDoc(['status' => 'ready_for_complete'] + $s);
         $this->context->customer = $customer;
         $currency = new Currency((int) $cart->id_currency);
-        $idemKey = $s['id_session'] . '-' . substr(hash('sha256', json_encode($instr)), 0, 16);
+        $idemKey = UcpBridgeIdempotency::chargeKey($s['id_session'], $instr, $cents, $currency->iso_code, (int) ($s['payload']['charge_attempt'] ?? 0));
         // Trace du débit engagé (lue par le rapprochement si le processus meurt pendant l'appel au prestataire).
         $s['payload']['charge_started_at'] = gmdate('Y-m-d\TH:i:s\Z');
         $s['payload']['charge_idempotency_key'] = $idemKey;
@@ -1206,7 +1206,8 @@ class UcpBridgeCart
             'instrument' => $instr,
             'id_cart' => (int) $cart->id,
             'session_id' => $s['id_session'],
-            // Session + instrument : un nouvel essai avec une autre carte n'hérite pas du refus précédent.
+            // Session, tentative, instrument, montant et devise : ni une autre carte, ni un panier modifié, ni un nouvel
+            // essai après un refus n'héritent de la réponse précédente du prestataire.
             'idempotency_key' => $idemKey,
             'buyer' => $s['payload']['buyer'] ?? [],
             'continue_url' => $this->module->buildContinueUrl((int) $cart->id),
@@ -1223,6 +1224,8 @@ class UcpBridgeCart
         if (UcpBridgePaymentResult::SUCCEEDED !== $pay->status) {
             // Refus du prestataire, aucun débit : la session redevient finalisable avec un autre moyen.
             unset($s['payload']['charge_started_at']);
+            // Refus définitif : le prochain essai, même avec la même carte, part avec une nouvelle clé d'idempotence.
+            $s['payload']['charge_attempt'] = (int) ($s['payload']['charge_attempt'] ?? 0) + 1;
             $s['status'] = 'ready_for_complete';
             $this->save($s, ['complete_in_progress']);
 
