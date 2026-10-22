@@ -47,7 +47,7 @@ class UcpBridgeCheckoutCompletion
     public function completeCheckout(array $s, array $body)
     {
         if ('updating' === $s['status']) {
-            return [409, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
+            return [409, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', UcpBridgeI18n::api('Session update in progress: completion refused, try again'), 'recoverable')])];
         }
         if (UcpBridgeSessionStore::isTerminal($s['status']) || UcpBridgeSessionStore::isBusy($s['status'])) {
             return [200, $this->view->checkoutDoc($s)];
@@ -71,7 +71,7 @@ class UcpBridgeCheckoutCompletion
         $handlerId = (string) ($instr['handler_id'] ?? '');
         $provider = '' !== $handlerId ? UcpBridgePaymentRegistry::get()->find($handlerId) : null;
         if (!$provider) {
-            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('payment_failed', 'Gestionnaire de paiement inconnu ou désactivé : ' . ($handlerId ?: '(aucun)'), 'recoverable', '$.payment.instruments[0].handler_id')])];
+            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('payment_failed', UcpBridgeI18n::api('Unknown or disabled payment handler: %handler%', ['%handler%' => $handlerId ?: UcpBridgeI18n::api('(none)')]), 'recoverable', '$.payment.instruments[0].handler_id')])];
         }
 
         // Réservation atomique : une seule requête passe de ready_for_complete à complete_in_progress, quelles que
@@ -80,7 +80,7 @@ class UcpBridgeCheckoutCompletion
         if (!$this->store->reserve($s['id_session'], ['ready_for_complete', 'incomplete'], 'complete_in_progress')) {
             $cur = $this->store->load($s['id_session'], 'checkout') ?: $s;
             if ('updating' === $cur['status']) {
-                return [409, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
+                return [409, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', UcpBridgeI18n::api('Session update in progress: completion refused, try again'), 'recoverable')])];
             }
 
             return [200, $this->view->checkoutDoc($cur)];
@@ -172,7 +172,7 @@ class UcpBridgeCheckoutCompletion
             PrestaShopLogger::addLog('ucpbridge session ' . $s['id_session'] . ' : panier ' . (int) $cart->id
                 . ' vide, à montant nul ou différent de la session, finalisation refusée sans débit', 2);
 
-            return $this->releaseWithoutCharge($s, $cart, [UcpBridgeMessage::error('invalid', 'Panier vide, à montant nul ou modifié pendant la finalisation : aucun débit', 'recoverable', '$.line_items')]);
+            return $this->releaseWithoutCharge($s, $cart, [UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Cart empty, with a zero amount or modified during completion: no charge'), 'recoverable', '$.line_items')]);
         }
 
         // Ce qui est présenté à l'acheteur au moment du paiement : base du journal de preuve.
@@ -225,7 +225,7 @@ class UcpBridgeCheckoutCompletion
         $error = null;
         try {
             $this->module->validateOrder((int) $cart->id, (int) Configuration::get('PS_OS_PAYMENT'), $amount, $pay->label,
-                'Commande UCP, session ' . $s['id_session'] . ', ' . $provider->getName() . ' ' . $pay->transactionId,
+                UcpBridgeI18n::admin('UCP order, session %session%, %provider% %transaction%', ['%session%' => $s['id_session'], '%provider%' => $provider->getName(), '%transaction%' => $pay->transactionId]),
                 ['transaction_id' => $pay->transactionId], (int) $cart->id_currency, false, $customer->secure_key);
         } catch (Throwable $e) {
             $error = $e->getMessage();

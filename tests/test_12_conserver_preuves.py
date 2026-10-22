@@ -86,14 +86,14 @@ def test_desinstallation_conserve_preuves_retractations_et_paiements(boutique, r
     assert r.returncode == 0, r.stdout + r.stderr
     assert {t: contenu(t) for t in PREUVES} == avant
     html = php(f"echo Module::getInstanceByName('ucpbridge')->hookDisplayAdminOrderMain(['id_order' => {oid}]);")
-    assert "Preuve UCP" in html and "demandée le" in html
+    assert 'id="ucpbridge-proof"' in html and 'data-ucp-withdrawal="requested"' in html
 
 
 def test_suppression_seulement_sur_choix_explicite(boutique, reinstallation):
     commande_avec_retractation(boutique)
     assert config("UCPBRIDGE_UNINSTALL_PURGE") == "0"  # par défaut : conservation
     html = back_office()
-    assert 'name="UCPBRIDGE_UNINSTALL_PURGE"' in html and "irréversible" in html
+    assert 'name="UCPBRIDGE_UNINSTALL_PURGE"' in html
     # Formulaire sans le jeton du module : choix refusé.
     back_office({"submitUcpbridge": "1", "ucp_csrf": "faux", "UCPBRIDGE_UNINSTALL_PURGE": "1"})
     assert config("UCPBRIDGE_UNINSTALL_PURGE") == "0"
@@ -151,5 +151,5 @@ def test_export_depuis_le_back_office(boutique):
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
         q["ucp_csrf"] = "faux"
         r = page.request.get(url.split("?")[0] + "?" + urllib.parse.urlencode(q))
-        assert "text/csv" not in r.headers.get("content-type", "") and "Jeton de sécurité invalide" in r.text()
+        assert "text/csv" not in r.headers.get("content-type", "") and "alert-danger" in r.text()
         nav.close()

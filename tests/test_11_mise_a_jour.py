@@ -196,10 +196,10 @@ def test_tout_fonctionne_apres_la_mise_a_jour(boutique, oauth_meta, mise_a_jour)
     r = boutique.get(f"/orders/{mise_a_jour['commande']}")
     assert r.code == 200 and r.doc["id"] == mise_a_jour["commande"], r.texte[:300]
     html = php(f"echo Module::getInstanceByName('ucpbridge')->hookDisplayAdminOrderMain(['id_order' => {mise_a_jour['oid']}]);")
-    assert "Preuve UCP" in html and "demandée le" in html
+    assert 'id="ucpbridge-proof"' in html and 'data-ucp-withdrawal="requested"' in html
     # Lien de rétractation signé avant la mise à jour : toujours valide, la demande est retrouvée.
     r = appel("GET", mise_a_jour["lien_retractation"])
-    assert r.code == 200 and "déjà été enregistrée" in r.texte, r.texte[:300]
+    assert r.code == 200 and 'data-ucp-page="withdrawal-already-recorded"' in r.texte, r.texte[:300]
     # Session en cours et panier de la 0.1.2 : finalisables après la mise à jour.
     assert boutique.get(f"/carts/{mise_a_jour['panier']}").code == 200
     r = boutique.payer_mock(mise_a_jour["en_cours"])

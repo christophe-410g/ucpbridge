@@ -341,7 +341,10 @@ Preuve, données personnelles, conformité
 - Tables de preuve conservées après une désinstallation : elles restent en base sans module pour les lire (export CSV
   à faire avant, ou réinstaller le module pour les consulter). La 0.1.2 et les versions antérieures, elles, les
   suppriment à la désinstallation : passer à la 0.1.3 par mise à jour, jamais par désinstallation.
-- Aucune chaîne traduisible (`$this->l()` / `trans()`) : messages aux agents en français, modèle `mails/en/` en français.
+- Traductions fournies en français et en anglais seulement. Restent en français : le journal PrestaShop (incidents,
+  rapprochement, purge) et les en-têtes de colonnes de l'export CSV (identifiants stables). Les montants des pages du
+  module suivent le format français (`1,00 €`) quelle que soit la langue. Les traductions se modifient dans les fichiers
+  XLIFF de `translations/` ; l'écran Traductions du back-office n'a pas été éprouvé avec ce module.
 
 Compatibilité et code
 - Versions de PrestaShop éprouvées par la suite complète (images Docker officielles `prestashop/prestashop`, une par
@@ -434,6 +437,20 @@ Modules > UCP Bridge pour PrestaShop (formulaire protégé par un jeton anti-CSR
 
 Les e-mails sont ceux de PrestaShop (Paramètres avancés > E-mail) : vérifier que l'envoi est actif.
 
+### Langues
+
+Toutes les chaînes lisibles passent par le traducteur de PrestaShop (nouveau système, PrestaShop 8.1 et suivants) :
+textes sources en anglais dans le code (`UcpBridgeI18n::admin()`, `shop()`, `api()` ; `{l s='...' d='...'}` dans les
+gabarits), traductions dans `translations/fr-FR/` et `translations/en-US/` (XLIFF), trois domaines :
+`Modules.Ucpbridge.Admin` (back-office, comptes rendus de purge et de rapprochement), `Modules.Ucpbridge.Shop` (pages
+du module, e-mails, compte client), `Modules.Ucpbridge.Api` (messages lisibles renvoyés aux agents). Le back-office suit
+la langue de l'employé, les pages et l'API celle de la boutique ou du visiteur, l'e-mail de confirmation et l'accusé de
+rétractation celle de la commande (modèles `mails/fr/` et `mails/en/`). Les codes UCP renvoyés aux agents (`code`,
+`severity`, `path`) ne changent jamais avec la langue. Ligne de commande : chaque ligne de `bin/purge.php` et
+`bin/reconcile.php` se termine par son code stable entre crochets (`[oauth_tokens]`, `[charge_unknown]`).
+`tools/translations.py` (racine du dépôt) met les catalogues à jour depuis le code ; `TranslationsTest` vérifie
+qu'aucune chaîne n'est sans traduction.
+
 ## Ajouter la boutique comme connecteur MCP dans un assistant
 
 1. Exposer la boutique en **HTTPS** : les assistants (Claude, ChatGPT, Gemini...) refusent un connecteur en HTTP.
@@ -519,6 +536,8 @@ classes/cart/UcpBridgeMessage.php   messages et enveloppes UCP (logique pure)
 classes/UcpBridgeCatalog.php  résolution des articles et déclinaisons, prix, stock, recherche
 classes/UcpBridgeDiscount.php codes promo sur les règles panier PrestaShop
 classes/UcpBridgeMcp.php      JSON-RPC 2.0 / MCP, traduit chaque outil vers la route REST (logique pure)
+classes/UcpBridgeI18n.php     traduction des chaînes lisibles (domaines Modules.Ucpbridge.Admin, Shop, Api)
+translations/{fr-FR,en-US}/   catalogues XLIFF des trois domaines
 classes/UcpBridgeLegal.php, UcpBridgeConsent.php, UcpBridgeTotals.php, UcpBridgeItemRef.php, UcpBridgeSigner.php,
 UcpBridgePkce.php             logique pure, couverte par les tests unitaires
 classes/UcpBridgeProof.php    tables du journal de preuve, des rétractations et des paiements (débits, remboursements)

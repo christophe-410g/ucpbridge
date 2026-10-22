@@ -21,7 +21,11 @@ class UcpBridgeApiKeys
     const LEGACY = 'UCPBRIDGE_API_KEY';
     const PREFIX = 'ucpk_';
     const DEFAULT_ID = 'default';
-    const DEFAULT_LABEL = 'Plateforme par défaut';
+    /** Nom de la plateforme par défaut, enregistré dans la langue de l'installation. */
+    public static function defaultLabel()
+    {
+        return UcpBridgeI18n::admin('Default platform');
+    }
 
     /* ------------------------------ Logique pure (testée sans PrestaShop) ------------------------------ */
 
@@ -71,13 +75,13 @@ class UcpBridgeApiKeys
             return $keys;
         }
 
-        return [self::DEFAULT_ID => ['label' => self::DEFAULT_LABEL, 'key' => $legacy, 'date_add' => (string) $now]] + $keys;
+        return [self::DEFAULT_ID => ['label' => self::defaultLabel(), 'key' => $legacy, 'date_add' => (string) $now]] + $keys;
     }
 
     /** Clés d'une installation neuve : la seule plateforme par défaut, avec une clé générée. */
     public static function initial($now)
     {
-        return [self::DEFAULT_ID => ['label' => self::DEFAULT_LABEL, 'key' => self::generate(), 'date_add' => (string) $now]];
+        return [self::DEFAULT_ID => ['label' => self::defaultLabel(), 'key' => self::generate(), 'date_add' => (string) $now]];
     }
 
     /** Valeur stockée en configuration (objet JSON, même vide). */

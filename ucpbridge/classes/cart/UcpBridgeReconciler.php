@@ -36,7 +36,7 @@ class UcpBridgeReconciler
      * session rendue finalisable. Lancé par bin/reconcile.php (ligne de commande, tâche planifiée) ou par le bouton
      * de la configuration du module.
      *
-     * @return array liste de [id_session, action]
+     * @return array liste de [id_session, action lisible, code stable de l'action]
      */
     public function reconcile($minutes = 15)
     {
@@ -52,16 +52,18 @@ class UcpBridgeReconciler
             }
             $s = $this->store->load($id, 'checkout');
             try {
-                $done[] = [$id, $this->reconcileOne($s, $r['status'])];
+                list($code, $label) = $this->reconcileOne($s, $r['status']);
+                $done[] = [$id, $label, $code];
             } catch (Throwable $e) {
                 PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ' : ' . $e->getMessage(), 3);
-                $done[] = [$id, 'erreur : ' . $e->getMessage()];
+                $done[] = [$id, UcpBridgeI18n::admin('error: %message%', ['%message%' => $e->getMessage()]), 'error'];
             }
         }
 
         return $done;
     }
 
+    /** @return array [code stable, libellé] */
     private function reconcileOne(array $s, $was)
     {
         $id = $s['id_session'];
@@ -74,7 +76,7 @@ class UcpBridgeReconciler
             $this->store->save($s, ['reconciling']);
             PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ', mise à jour interrompue, session rendue (' . $s['status'] . ')', 2);
 
-            return 'mise à jour interrompue, session rendue';
+            return ['update_interrupted', UcpBridgeI18n::admin('update interrupted, session released')];
         }
         $charge = Db::getInstance()->getRow('SELECT * FROM `' . _DB_PREFIX_ . 'ucpbridge_payment` WHERE session_id = \'' . pSQL($id) . '\'
             AND operation = \'charge\' AND status = \'succeeded\' ORDER BY id_payment DESC');
@@ -86,7 +88,7 @@ class UcpBridgeReconciler
                 . ' trouvée sur le panier : session terminée, aucun remboursement', 2);
             $this->completion->markCompleted($s, $idOrder, $charge ? $charge['transaction_id'] : '', $charge ? $charge['provider'] : '');
 
-            return 'commande ' . $idOrder . ' trouvée, session terminée';
+            return ['order_found', UcpBridgeI18n::admin('order %order% found, session completed', ['%order%' => $idOrder])];
         }
         if ($charge && !$refunded) {
             $providers = UcpBridgePaymentRegistry::get()->all();
@@ -96,7 +98,8 @@ class UcpBridgeReconciler
                 $this->completion->orderFailedAfterCharge($s, $provider, $charged, 'processus interrompu après le débit (rapprochement)', 'rapprochement');
                 $f = $this->store->load($id, 'checkout')['payload']['failure'] ?? [];
 
-                return !empty($f['refunded']) ? 'débit sans commande, remboursé' : 'débit sans commande, remboursement IMPOSSIBLE';
+                return !empty($f['refunded']) ? ['charged_refunded', UcpBridgeI18n::admin('charge without order, refunded')]
+                    : ['charged_refund_failed', UcpBridgeI18n::admin('charge without order, refund IMPOSSIBLE')];
             }
             PrestaShopLogger::addLog('ucpbridge incident (rapprochement) : session ' . $id . ', débit ' . $charge['transaction_id']
                 . ' sans commande, adaptateur ' . $charge['provider'] . ' introuvable : remboursement à faire à la main', 4);
@@ -104,7 +107,7 @@ class UcpBridgeReconciler
             $s['payload']['failure'] = ['transaction_id' => $charge['transaction_id'], 'refunded' => false, 'refund_id' => '', 'at' => gmdate('Y-m-d\TH:i:s\Z')];
             $this->store->save($s, ['reconciling']);
 
-            return 'débit sans commande, adaptateur introuvable';
+            return ['charged_provider_missing', UcpBridgeI18n::admin('charge without order, payment adapter not found')];
         }
         if (!empty($s['payload']['charge_started_at'])) {
             // Le processus est mort pendant l'appel au prestataire : résultat inconnu, aucune décision automatique.
@@ -115,7 +118,7 @@ class UcpBridgeReconciler
             $s['payload']['failure'] = ['transaction_id' => '', 'refunded' => false, 'unknown' => true, 'at' => gmdate('Y-m-d\TH:i:s\Z')];
             $this->store->save($s, ['reconciling']);
 
-            return 'débit incertain, à vérifier chez le prestataire';
+            return ['charge_unknown', UcpBridgeI18n::admin('uncertain charge, to be checked with the payment provider')];
         }
         // Réservation sans débit engagé : la session redevient finalisable.
         $s['status'] = 'incomplete';
@@ -123,6 +126,6 @@ class UcpBridgeReconciler
         $this->store->save($s, ['reconciling']);
         PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ' bloquée sans débit, rendue (' . $s['status'] . ')', 1);
 
-        return 'aucun débit, session rendue (' . $s['status'] . ')';
+        return ['released', UcpBridgeI18n::admin('no charge, session released (%status%)', ['%status%' => $s['status']])];
     }
 }

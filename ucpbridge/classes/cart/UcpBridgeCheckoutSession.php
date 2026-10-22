@@ -57,7 +57,7 @@ class UcpBridgeCheckoutSession
             // Conversion d'un panier UCP existant en session de caisse.
             $c = $this->store->load((string) $body['cart_id'], 'cart');
             if (!$c || 'active' !== $c['status'] || !$this->caller->owns($c)) {
-                return [404, $this->errorDoc([UcpBridgeMessage::error('not_found', 'Panier introuvable', 'unrecoverable', '$.cart_id')], ['dev.ucp.shopping.checkout'])];
+                return [404, $this->errorDoc([UcpBridgeMessage::error('not_found', UcpBridgeI18n::api('Cart not found'), 'unrecoverable', '$.cart_id')], ['dev.ucp.shopping.checkout'])];
             }
             $lineItems = array_map(function ($l) {
                 return ['id' => $l['id'], 'item' => array_filter(['id' => $l['requested_id'], 'variant_id' => $l['requested_variant_id']]), 'quantity' => $l['quantity']];
@@ -72,7 +72,7 @@ class UcpBridgeCheckoutSession
         }
         $cart = $this->lines->newPsCart();
         if (!$this->lines->fillCart($cart, $lines)) {
-            return [200, $this->errorDoc([UcpBridgeMessage::error('out_of_stock', 'Impossible d\'ajouter les articles', 'unrecoverable')], ['dev.ucp.shopping.checkout'])];
+            return [200, $this->errorDoc([UcpBridgeMessage::error('out_of_stock', UcpBridgeI18n::api('Unable to add the items'), 'unrecoverable')], ['dev.ucp.shopping.checkout'])];
         }
         $s = [
             'id_session' => 'chk_' . bin2hex(random_bytes(10)),
@@ -98,7 +98,7 @@ class UcpBridgeCheckoutSession
     public function updateCheckout(array $s, array $body)
     {
         if (UcpBridgeSessionStore::isTerminal($s['status'])) {
-            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', 'Session ' . UcpBridgeSessionStore::exposedStatus($s['status']) . ' : modification impossible', 'unrecoverable')])];
+            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', UcpBridgeI18n::api('Session %status%: cannot be modified', ['%status%' => UcpBridgeSessionStore::exposedStatus($s['status'])]), 'unrecoverable')])];
         }
         // Réservation AVANT toute modification du panier PrestaShop (même statut que celui lu : une écriture concurrente
         // fait échouer la réservation). Une session réservée (finalisation, autre mise à jour, rapprochement) est refusée
@@ -107,10 +107,10 @@ class UcpBridgeCheckoutSession
         if (UcpBridgeSessionStore::isBusy($prev) || !$this->store->reserve($s['id_session'], [$prev], 'updating')) {
             $cur = $this->store->load($s['id_session'], 'checkout') ?: $s;
             if (UcpBridgeSessionStore::isTerminal($cur['status'])) {
-                return [200, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Session ' . UcpBridgeSessionStore::exposedStatus($cur['status']) . ' : modification impossible', 'unrecoverable')])];
+                return [200, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', UcpBridgeI18n::api('Session %status%: cannot be modified', ['%status%' => UcpBridgeSessionStore::exposedStatus($cur['status'])]), 'unrecoverable')])];
             }
 
-            return [409, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Session réservée (finalisation ou mise à jour en cours) : modification refusée', 'recoverable')])];
+            return [409, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', UcpBridgeI18n::api('Session reserved (completion or update in progress): modification refused'), 'recoverable')])];
         }
         $s = $this->store->load($s['id_session'], 'checkout');
         $s['status'] = $prev;
@@ -153,7 +153,7 @@ class UcpBridgeCheckoutSession
         } elseif (isset($body['buyer']) && is_array($body['buyer'])) {
             $b = $body['buyer'];
             if (!empty($b['email']) && !Validate::isEmail($b['email'])) {
-                $msgs[] = UcpBridgeMessage::error('invalid', 'Adresse e-mail invalide', 'recoverable', '$.buyer.email');
+                $msgs[] = UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Invalid e-mail address'), 'recoverable', '$.buyer.email');
                 unset($b['email']);
             }
             $s['payload']['buyer'] = array_merge($s['payload']['buyer'] ?? [], array_intersect_key($b, array_flip(['email', 'first_name', 'last_name', 'phone_number'])));
@@ -223,7 +223,7 @@ class UcpBridgeCheckoutSession
         }
         $busy = 'completed' === $s['status'] || UcpBridgeSessionStore::isBusy($s['status']);
 
-        return [200, $this->view->checkoutDoc($s, $busy ? [UcpBridgeMessage::error('not_modifiable', 'completed' === $s['status'] ? 'Commande déjà passée'
-            : ('updating' === $s['status'] ? 'Mise à jour en cours' : 'Finalisation en cours'), 'unrecoverable')] : [])];
+        return [200, $this->view->checkoutDoc($s, $busy ? [UcpBridgeMessage::error('not_modifiable', 'completed' === $s['status'] ? UcpBridgeI18n::api('Order already placed')
+            : ('updating' === $s['status'] ? UcpBridgeI18n::api('Update in progress') : UcpBridgeI18n::api('Completion in progress')), 'unrecoverable')] : [])];
     }
 }

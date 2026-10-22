@@ -51,8 +51,14 @@ final class RetentionTest extends TestCase
     {
         $lines = UcpBridgeRetention::summary(['guests' => 2, 'sessions_deleted' => 5], false);
         $this->assertCount(count(UcpBridgeRetention::REPORT), $lines);
-        $this->assertSame('Sessions et paniers UCP supprimés : 5', $lines[0]);
-        $this->assertContains('Clients invités sans commande supprimés : 2', $lines);
-        $this->assertContains('Clients invités sans commande à supprimer : 2', UcpBridgeRetention::summary(['guests' => 2], true));
+        $this->assertSame(UcpBridgeRetention::REPORT, array_keys($lines));
+        $this->assertStringEndsWith(' : 5', $lines['sessions_deleted']);
+        $this->assertStringEndsWith(' : 2', $lines['guests']);
+        $this->assertStringEndsWith(' : 0', $lines['carts']);
+        // Simulation : autre libellé, mêmes codes et mêmes nombres.
+        $dry = UcpBridgeRetention::summary(['guests' => 2], true);
+        $this->assertSame(UcpBridgeRetention::REPORT, array_keys($dry));
+        $this->assertNotSame($lines['guests'], $dry['guests']);
+        $this->assertStringEndsWith(' : 2', $dry['guests']);
     }
 }

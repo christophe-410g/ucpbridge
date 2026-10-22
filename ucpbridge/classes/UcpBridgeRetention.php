@@ -24,33 +24,61 @@ class UcpBridgeRetention
     /** Durée maximale acceptée (100 ans). */
     const MAX_DAYS = 36500;
 
-    /** Catégorie => [clé de configuration, durée par défaut en jours, libellé]. */
+    /** Catégorie => [clé de configuration, durée par défaut en jours] (libellé : label()). */
     const CATEGORIES = [
-        'sessions' => ['UCPBRIDGE_RETENTION_SESSIONS', 30, 'Sessions de caisse et paniers terminés ou expirés'],
-        'guests' => ['UCPBRIDGE_RETENTION_GUESTS', 30, 'Clients invités créés par le module, sans commande'],
-        'oauth' => ['UCPBRIDGE_RETENTION_OAUTH', 30, 'Codes et jetons OAuth expirés ou révoqués'],
-        'payments' => ['UCPBRIDGE_RETENTION_PAYMENTS', 3650, 'Journal des paiements (débits, remboursements)'],
-        'proofs' => ['UCPBRIDGE_RETENTION_PROOFS', 3650, 'Journal de preuve et demandes de rétractation'],
+        'sessions' => ['UCPBRIDGE_RETENTION_SESSIONS', 30],
+        'guests' => ['UCPBRIDGE_RETENTION_GUESTS', 30],
+        'oauth' => ['UCPBRIDGE_RETENTION_OAUTH', 30],
+        'payments' => ['UCPBRIDGE_RETENTION_PAYMENTS', 3650],
+        'proofs' => ['UCPBRIDGE_RETENTION_PROOFS', 3650],
     ];
 
     /** Données personnelles d'une session, retirées d'une session terminée par une commande. */
     const PERSONAL_KEYS = ['buyer', 'consent', 'destination', 'terms_acceptance', 'context'];
 
-    /** Lignes du compte rendu : clé => [libellé après purge, libellé en simulation]. */
-    const REPORT = [
-        'sessions_deleted' => ['Sessions et paniers UCP supprimés', 'Sessions et paniers UCP à supprimer'],
-        'sessions_minimized' => ['Sessions terminées par une commande, données personnelles retirées',
-            'Sessions terminées par une commande, données personnelles à retirer'],
-        'carts' => ['Paniers PrestaShop sans commande supprimés', 'Paniers PrestaShop sans commande à supprimer'],
-        'addresses' => ['Adresses sans client supprimées', 'Adresses sans client à supprimer'],
-        'guests' => ['Clients invités sans commande supprimés', 'Clients invités sans commande à supprimer'],
-        'oauth_codes' => ['Codes OAuth supprimés', 'Codes OAuth à supprimer'],
-        'oauth_tokens' => ['Jetons OAuth supprimés', 'Jetons OAuth à supprimer'],
-        'payments' => ['Opérations du journal des paiements supprimées', 'Opérations du journal des paiements à supprimer'],
-        'proofs' => ['Preuves de commande supprimées', 'Preuves de commande à supprimer'],
-        'withdrawals' => ['Demandes de rétractation supprimées', 'Demandes de rétractation à supprimer'],
-        'idempotency' => ['Clés d\'idempotence de plus de 24 h supprimées', 'Clés d\'idempotence de plus de 24 h à supprimer'],
-    ];
+    /** Lignes du compte rendu, dans l'ordre d'affichage (codes stables ; libellés : reportLabel()). */
+    const REPORT = ['sessions_deleted', 'sessions_minimized', 'carts', 'addresses', 'guests', 'oauth_codes', 'oauth_tokens', 'payments',
+        'proofs', 'withdrawals', 'idempotency'];
+
+    /** Libellé traduit d'une catégorie de données. */
+    public static function label($cat)
+    {
+        switch ($cat) {
+            case 'sessions':
+                return UcpBridgeI18n::admin('Checkout sessions and carts completed or expired');
+            case 'guests':
+                return UcpBridgeI18n::admin('Guest customers created by the module, without an order');
+            case 'oauth':
+                return UcpBridgeI18n::admin('Expired or revoked OAuth codes and tokens');
+            case 'payments':
+                return UcpBridgeI18n::admin('Payment log (charges, refunds)');
+            case 'proofs':
+                return UcpBridgeI18n::admin('Evidence log and withdrawal requests');
+        }
+
+        return (string) $cat;
+    }
+
+    /** Libellé traduit d'une ligne du compte rendu, après purge ou en simulation. */
+    public static function reportLabel($key, $dryRun)
+    {
+        $labels = [
+            'sessions_deleted' => [UcpBridgeI18n::admin('UCP sessions and carts deleted'), UcpBridgeI18n::admin('UCP sessions and carts to delete')],
+            'sessions_minimized' => [UcpBridgeI18n::admin('Sessions completed by an order, personal data removed'),
+                UcpBridgeI18n::admin('Sessions completed by an order, personal data to remove')],
+            'carts' => [UcpBridgeI18n::admin('PrestaShop carts without an order deleted'), UcpBridgeI18n::admin('PrestaShop carts without an order to delete')],
+            'addresses' => [UcpBridgeI18n::admin('Addresses without a customer deleted'), UcpBridgeI18n::admin('Addresses without a customer to delete')],
+            'guests' => [UcpBridgeI18n::admin('Guest customers without an order deleted'), UcpBridgeI18n::admin('Guest customers without an order to delete')],
+            'oauth_codes' => [UcpBridgeI18n::admin('OAuth codes deleted'), UcpBridgeI18n::admin('OAuth codes to delete')],
+            'oauth_tokens' => [UcpBridgeI18n::admin('OAuth tokens deleted'), UcpBridgeI18n::admin('OAuth tokens to delete')],
+            'payments' => [UcpBridgeI18n::admin('Payment log entries deleted'), UcpBridgeI18n::admin('Payment log entries to delete')],
+            'proofs' => [UcpBridgeI18n::admin('Order evidence records deleted'), UcpBridgeI18n::admin('Order evidence records to delete')],
+            'withdrawals' => [UcpBridgeI18n::admin('Withdrawal requests deleted'), UcpBridgeI18n::admin('Withdrawal requests to delete')],
+            'idempotency' => [UcpBridgeI18n::admin('Idempotency keys older than 24 h deleted'), UcpBridgeI18n::admin('Idempotency keys older than 24 h to delete')],
+        ];
+
+        return isset($labels[$key]) ? $labels[$key][$dryRun ? 1 : 0] : (string) $key;
+    }
 
     /** Configuration par défaut : clé => durée. */
     public static function defaults()
@@ -96,12 +124,12 @@ class UcpBridgeRetention
         return $payload;
     }
 
-    /** Compte rendu lisible : une ligne par catégorie, dans l'ordre de REPORT. */
+    /** Compte rendu lisible : code stable => « libellé : nombre », une ligne par catégorie, dans l'ordre de REPORT. */
     public static function summary(array $counts, $dryRun)
     {
         $lines = [];
-        foreach (self::REPORT as $k => $label) {
-            $lines[] = $label[$dryRun ? 1 : 0] . ' : ' . (int) ($counts[$k] ?? 0);
+        foreach (self::REPORT as $k) {
+            $lines[$k] = self::reportLabel($k, $dryRun) . ' : ' . (int) ($counts[$k] ?? 0);
         }
 
         return $lines;

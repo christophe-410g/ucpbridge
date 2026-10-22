@@ -28,9 +28,10 @@ def purge(*args):
     return r.stdout
 
 
-def compte(rapport, libelle):
-    m = re.search(re.escape(libelle) + r" : (\d+)", rapport)
-    assert m, f"« {libelle} » absent du compte rendu :\n{rapport}"
+def compte(rapport, code):
+    """Nombre d'une ligne du compte rendu, repérée par son code stable (le libellé suit la langue de la boutique)."""
+    m = re.search(r" : (\d+) \[" + re.escape(code) + r"\]$", rapport, re.M)
+    assert m, f"« {code} » absent du compte rendu :\n{rapport}"
     return int(m.group(1))
 
 
@@ -82,8 +83,8 @@ def test_client_invite_sans_commande_purge(boutique):
     assert sql_val(f"SELECT COUNT(*) FROM ps_customer WHERE id_customer = {client}") == "1"
     vieillir(sid, client)
     rapport = purge()
-    assert compte(rapport, "Clients invités sans commande supprimés") >= 1
-    assert compte(rapport, "Sessions et paniers UCP supprimés") >= 1
+    assert compte(rapport, "guests") >= 1
+    assert compte(rapport, "sessions_deleted") >= 1
     assert sql_val(f"SELECT COUNT(*) FROM ps_customer WHERE id_customer = {client}") == "0"
     assert sql_val(f"SELECT COUNT(*) FROM ps_address WHERE id_address = {adresse}") == "0"
     assert sql_val(f"SELECT COUNT(*) FROM ps_cart WHERE id_cart = {cart}") == "0"
@@ -104,7 +105,7 @@ def test_client_invite_qui_a_commande_jamais_purge(boutique):
     vieillir(sid, client, jours=400)
     avant = commandes_intactes()
     rapport = purge()
-    assert compte(rapport, "Sessions terminées par une commande, données personnelles retirées") >= 1
+    assert compte(rapport, "sessions_minimized") >= 1
     # Le client et sa commande restent, avec l'adresse de livraison.
     assert sql_val(f"SELECT CONCAT(email, ' ', is_guest) FROM ps_customer WHERE id_customer = {client}") == b["email"] + " 1"
     assert sql_val(f"SELECT COUNT(*) FROM ps_orders WHERE id_order = {oid} AND id_customer = {client}") == "1"
@@ -179,11 +180,11 @@ def test_purge_oauth_paiements_preuves(lignes_fabriquees):
     t = lignes_fabriquees
     avant = commandes_intactes()
     simulation = purge("--dry-run")
-    assert "simulation" in simulation.lower() and compte(simulation, "Jetons OAuth à supprimer") >= 2
+    assert "[dry-run]" in simulation.splitlines()[0] and compte(simulation, "oauth_tokens") >= 2
     assert restants(t)["codes"] == "2"  # la simulation ne supprime rien
     rapport = purge()
-    assert compte(rapport, "Codes OAuth supprimés") >= 1 and compte(rapport, "Jetons OAuth supprimés") >= 2
-    assert compte(rapport, "Preuves de commande supprimées") >= 1 and compte(rapport, "Demandes de rétractation supprimées") >= 1
+    assert compte(rapport, "oauth_codes") >= 1 and compte(rapport, "oauth_tokens") >= 2
+    assert compte(rapport, "proofs") >= 1 and compte(rapport, "withdrawals") >= 1
     assert restants(t) == {"codes": "1", "jetons": ["1", "1"], "paiements": ["recent"], "preuves": [str(FAUSSE_COMMANDE + 1)],
                            "retractations": [str(FAUSSE_COMMANDE + 1)]}
     assert commandes_intactes() == avant
@@ -215,22 +216,22 @@ def test_durees_et_purge_depuis_le_back_office(boutique, lignes_fabriquees):
     nouvelles = dict(DUREES, UCPBRIDGE_RETENTION_SESSIONS="45")
     # Jeton faux : rien n'est enregistré ni purgé.
     html = back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "faux", **nouvelles})
-    assert "Jeton de sécurité invalide" in html and config("UCPBRIDGE_RETENTION_SESSIONS") == "30"
+    assert "alert-danger" in html and config("UCPBRIDGE_RETENTION_SESSIONS") == "30"
     html = back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "JETON", **nouvelles})
     assert config("UCPBRIDGE_RETENTION_SESSIONS") == "45"
     # Durée invalide : refusée, valeur précédente conservée, autres réglages du module intacts.
     secret = config("UCPBRIDGE_MOCK_SECRET")
     html = back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "JETON", **dict(nouvelles, UCPBRIDGE_RETENTION_GUESTS="-3")})
-    assert "Durée de conservation invalide" in html and config("UCPBRIDGE_RETENTION_GUESTS") == "30"
+    assert "alert-danger" in html and config("UCPBRIDGE_RETENTION_GUESTS") == "30"
     assert config("UCPBRIDGE_MOCK_SECRET") == secret
     # Simulation puis purge, avec compte rendu.
     html = back_office({"submitUcpbridgePurgeDry": "1", "ucp_csrf": "JETON"})
-    assert "Simulation" in html and "Jetons OAuth à supprimer" in html
+    assert 'data-ucp-mode="dry-run"' in html and 'data-ucp-code="oauth_tokens"' in html
     assert restants(lignes_fabriquees)["codes"] == "2"
     html = back_office({"submitUcpbridgePurge": "1", "ucp_csrf": "faux"})
-    assert "Jeton de sécurité invalide" in html and restants(lignes_fabriquees)["codes"] == "2"
+    assert "alert-danger" in html and 'id="ucpbridge-purge-report"' not in html and restants(lignes_fabriquees)["codes"] == "2"
     html = back_office({"submitUcpbridgePurge": "1", "ucp_csrf": "JETON"})
-    assert "Compte rendu de la purge" in html and "Jetons OAuth supprimés" in html
+    assert 'data-ucp-mode="purge"' in html and 'data-ucp-code="oauth_tokens"' in html
     assert restants(lignes_fabriquees)["codes"] == "1"
 
 
@@ -244,5 +245,5 @@ def test_session_abandonnee_sans_email_adresse_orpheline_purgee(boutique):
     assert adresse and sql_val(f"SELECT id_customer FROM ps_address WHERE id_address = {adresse}") == "0"
     vieillir(sid)
     rapport = purge()
-    assert compte(rapport, "Adresses sans client supprimées") >= 1
+    assert compte(rapport, "addresses") >= 1
     assert sql_val(f"SELECT COUNT(*) FROM ps_address WHERE id_address = {adresse}") == "0"

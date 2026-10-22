@@ -78,7 +78,7 @@ class UcpBridgePurge
     /** @return array compte par ligne du compte rendu (clés de UcpBridgeRetention::REPORT) */
     public function run()
     {
-        $this->counts = array_fill_keys(array_keys(UcpBridgeRetention::REPORT), 0);
+        $this->counts = array_fill_keys(UcpBridgeRetention::REPORT, 0);
         $d = self::durations();
         $cut = function ($cat) use ($d) {
             return UcpBridgeRetention::cutoff($d[$cat], $this->now);

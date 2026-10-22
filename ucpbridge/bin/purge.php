@@ -24,7 +24,7 @@ require $root . '/config/config.inc.php';
 
 $module = Module::getInstanceByName('ucpbridge');
 if (!$module || !Module::isInstalled('ucpbridge')) {
-    fwrite(STDERR, "module ucpbridge non installé\n");
+    fwrite(STDERR, "ucpbridge module not installed\n");
     exit(1);
 }
 $ctx = Context::getContext();
@@ -32,13 +32,14 @@ $ctx->shop = new Shop((int) Configuration::get('PS_SHOP_DEFAULT'));
 $ctx->link = new Link();
 $ctx->language = new Language((int) Configuration::get('PS_LANG_DEFAULT'));
 
-echo $dryRun ? "Purge RGPD ucpbridge : simulation, rien n'est supprimé\n" : "Purge RGPD ucpbridge : compte rendu\n";
+echo $dryRun ? UcpBridgeI18n::admin('ucpbridge GDPR purge: simulation, nothing is deleted') : UcpBridgeI18n::admin('ucpbridge GDPR purge: report'), $dryRun ? ' [dry-run]' : ' [purge]', "\n";
 $durations = [];
 foreach (UcpBridgePurge::durations() as $cat => $days) {
-    $durations[] = $cat . ' ' . ($days ? $days . ' j' : 'jamais');
+    $durations[] = $cat . ' ' . ($days ? UcpBridgeI18n::admin('%days% d', ['%days%' => $days]) : UcpBridgeI18n::admin('never'));
 }
-echo 'Durées de conservation : ', implode(', ', $durations), "\n";
-foreach (UcpBridgeRetention::summary((new UcpBridgePurge($dryRun))->run(), $dryRun) as $line) {
-    echo $line, "\n";
+echo UcpBridgeI18n::admin('Retention periods: %list%', ['%list%' => implode(', ', $durations)]), "\n";
+// Code stable entre crochets : à lire par les scripts, le libellé suit la langue de la boutique.
+foreach (UcpBridgeRetention::summary((new UcpBridgePurge($dryRun))->run(), $dryRun) as $code => $line) {
+    echo $line, ' [', $code, "]\n";
 }
 exit(0);

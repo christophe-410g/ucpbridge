@@ -63,6 +63,20 @@ Nouveautés
   `UcpBridgeCheckoutCompletion` (finalisation, débit, commande, journaux), `UcpBridgeReconciler` (rapprochement),
   `UcpBridgeOrderView` (document de commande). Tests : `MessageTest` (unitaire), `tests/test_14_back_office.py`
   (chaque fonction de la configuration depuis le navigateur).
+- Traductions (#15) : toutes les chaînes destinées à un humain passent par le traducteur de PrestaShop (nouveau
+  système, `isUsingNewTranslationSystem()`), textes sources en anglais, français et anglais fournis
+  (`translations/fr-FR/`, `translations/en-US/`, 341 chaînes : 155 `Modules.Ucpbridge.Admin`, 57
+  `Modules.Ucpbridge.Shop`, 129 `Modules.Ucpbridge.Api`). Nouvelle classe `UcpBridgeI18n` (texte source rendu tel quel
+  hors PrestaShop, pour les tests unitaires). Back-office dans la langue de l'employé ; pages du module (`html lang`),
+  API et MCP (descriptions des outils, instructions, messages) dans celle de la boutique ou du visiteur ; e-mail de
+  confirmation (bloc légal) et accusé de rétractation (objet et modèle) dans celle de la commande. Modèle
+  `mails/en/ucp_withdrawal` en anglais. Codes UCP inchangés. Codes stables ajoutés pour les scripts et les tests :
+  `data-ucp-page` sur les pages du module, `data-ucp-row` et `data-ucp-withdrawal` sur le bloc de preuve,
+  `data-ucp-code` et `data-ucp-mode` sur les comptes rendus du back-office, code entre crochets en fin de ligne de
+  `bin/purge.php` et `bin/reconcile.php` ; `UcpBridgeCart::reconcile()` renvoie aussi le code de l'action et
+  `UcpBridgeRetention::summary()` des lignes indexées par code. Les tests vérifient ces codes, plus les libellés ;
+  seul `tests/test_15_traductions.py` lit des libellés, pour vérifier la langue (boutique en anglais puis en
+  français). `TranslationsTest` (unitaire) : chaque chaîne a sa traduction, sans orpheline ni paramètre perdu.
 
 Corrections
 
