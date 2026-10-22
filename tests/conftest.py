@@ -286,7 +286,10 @@ def admin_login(page):
     page.fill("#email", ADMIN_EMAIL)
     page.fill("#passwd", ADMIN_MDP)
     page.click("#submit_login")
-    page.wait_for_load_state("networkidle")
+    # Connexion en AJAX puis redirection vers le tableau de bord. Pas d'attente « networkidle » : le tableau de bord de
+    # PrestaShop 9.2 interroge le serveur en continu et n'est jamais au repos.
+    page.wait_for_url(lambda u: "AdminLogin" not in u, timeout=30000)
+    page.wait_for_load_state("load")
 
 
 def mails(destinataire):
