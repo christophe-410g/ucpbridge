@@ -22,6 +22,7 @@ require_once __DIR__ . '/classes/UcpBridgeCatalog.php';
 require_once __DIR__ . '/classes/cart/UcpBridgeCaller.php';
 require_once __DIR__ . '/classes/cart/UcpBridgeSessionStore.php';
 require_once __DIR__ . '/classes/cart/UcpBridgeMessage.php';
+require_once __DIR__ . '/classes/cart/UcpBridgeCartLines.php';
 require_once __DIR__ . '/classes/UcpBridgeCart.php';
 require_once __DIR__ . '/classes/UcpBridgeIdempotency.php';
 require_once __DIR__ . '/classes/UcpBridgeApiKeys.php';

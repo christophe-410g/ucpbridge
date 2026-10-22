@@ -30,6 +30,8 @@ class UcpBridgeCart
     private $caller;
     /** @var UcpBridgeSessionStore */
     private $store;
+    /** @var UcpBridgeCartLines */
+    private $lines;
 
     public function __construct(Context $context, Ucpbridge $module)
     {
@@ -38,6 +40,7 @@ class UcpBridgeCart
         $this->catalog = new UcpBridgeCatalog($context);
         $this->caller = new UcpBridgeCaller();
         $this->store = new UcpBridgeSessionStore($this->caller);
+        $this->lines = new UcpBridgeCartLines($context, $this->catalog);
     }
 
     public function catalog()
@@ -128,6 +131,12 @@ class UcpBridgeCart
 
     /* ============================ Stockage sessions ============================ */
 
+    /** @return array [lignes résolues, messages d'erreur] */
+    public function resolveLines($lineItems)
+    {
+        return $this->lines->resolveLines($lineItems);
+    }
+
     public function load($id, $kind)
     {
         return $this->store->load($id, $kind);
@@ -139,138 +148,6 @@ class UcpBridgeCart
     }
 
     /* ============================== Lignes d'articles ============================== */
-
-    /**
-     * Valide et résout les line_items demandés.
-     *
-     * @return array [lignes résolues, messages d'erreur]
-     */
-    public function resolveLines($lineItems)
-    {
-        $lines = [];
-        $errors = [];
-        if (!is_array($lineItems) || !$lineItems) {
-            return [[], [UcpBridgeMessage::error('invalid', 'line_items est requis et ne peut pas être vide', 'recoverable', '$.line_items')]];
-        }
-        foreach (array_values($lineItems) as $i => $li) {
-            $qty = (int) ($li['quantity'] ?? 1);
-            $path = '$.line_items[' . $i . ']';
-            if ($qty < 1 || $qty > 999) {
-                $errors[] = UcpBridgeMessage::error('invalid', 'Quantité invalide', 'recoverable', $path . '.quantity');
-                continue;
-            }
-            $item = is_array($li['item'] ?? null) ? $li['item'] : [];
-            $r = $this->catalog->resolve($item);
-            if (!$r['ok']) {
-                $extra = isset($r['variants']) ? ['variants' => $r['variants']] : [];
-                $errors[] = UcpBridgeMessage::error($r['code'], $r['content'], 'recoverable', $path . '.item', $extra);
-                continue;
-            }
-            if (!$this->catalog->canOrder($r['id_product'], $r['id_product_attribute'], $qty)) {
-                $errors[] = UcpBridgeMessage::error('out_of_stock', 'Stock insuffisant pour cette déclinaison ('
-                    . $this->catalog->stock($r['id_product'], $r['id_product_attribute']) . ' disponible(s))', 'recoverable', $path);
-                continue;
-            }
-            $lines[] = [
-                'id' => (string) ($li['id'] ?? ('li_' . ($i + 1))),
-                'requested_id' => (string) $item['id'],
-                'requested_variant_id' => isset($item['variant_id']) ? (string) $item['variant_id'] : null,
-                'id_product' => (int) $r['id_product'],
-                'id_product_attribute' => (int) $r['id_product_attribute'],
-                'quantity' => $qty,
-            ];
-        }
-
-        return [$lines, $errors];
-    }
-
-    private function newPsCart()
-    {
-        $cart = new Cart();
-        $cart->id_shop = (int) $this->context->shop->id;
-        $cart->id_shop_group = (int) $this->context->shop->id_shop_group;
-        $cart->id_lang = (int) $this->context->language->id;
-        $cart->id_currency = (int) $this->context->currency->id;
-        $cart->id_customer = 0;
-        $cart->id_guest = 0;
-        $cart->id_carrier = 0;
-        $cart->add();
-
-        return $cart;
-    }
-
-    /** Remplace intégralement le contenu du panier PrestaShop (sémantique UCP : full replacement). */
-    private function fillCart(Cart $cart, array $lines)
-    {
-        $this->context->cart = $cart;
-        foreach ($cart->getProducts(true) as $p) {
-            $cart->deleteProduct((int) $p['id_product'], (int) $p['id_product_attribute'], (int) $p['id_customization']);
-        }
-        foreach ($lines as $l) {
-            $res = $cart->updateQty($l['quantity'], $l['id_product'], $l['id_product_attribute'] ?: null, false, 'up',
-                (int) $cart->id_address_delivery, null, true, true);
-            if (!$res || $res < 0) {
-                return false;
-            }
-        }
-        Cart::resetStaticCache();
-
-        return true;
-    }
-
-    private function bindContext(Cart $cart)
-    {
-        $this->context->cart = $cart;
-        if ($cart->id_customer) {
-            $this->context->customer = new Customer((int) $cart->id_customer);
-        }
-    }
-
-    /** Lignes UCP à partir du panier PrestaShop réel (prix TTC de la déclinaison, prix spécifiques inclus). */
-    private function renderLines(Cart $cart, array $lines)
-    {
-        $byKey = [];
-        foreach ($cart->getProducts(true) as $p) {
-            $byKey[(int) $p['id_product'] . '-' . (int) $p['id_product_attribute']] = $p;
-        }
-        $out = [];
-        foreach ($lines as $l) {
-            $key = $l['id_product'] . '-' . $l['id_product_attribute'];
-            if (!isset($byKey[$key])) {
-                continue;
-            }
-            $p = $byKey[$key];
-            $unit = (int) round(((float) $p['price_wt']) * 100);
-            $total = (int) round(((float) $p['total_wt']) * 100);
-            $item = [
-                'id' => $l['requested_id'],
-                'title' => $p['name'] . (!empty($p['attributes']) ? ' (' . $p['attributes'] . ')' : ''),
-                'price' => $unit,
-                'variant_id' => UcpBridgeCatalog::variantKey($l['id_product'], $l['id_product_attribute']),
-                'sku' => (string) $p['reference'],
-            ];
-            if (!empty($p['id_image'])) {
-                $parts = explode('-', (string) $p['id_image']);
-                $item['image_url'] = $this->context->link->getImageLink($p['link_rewrite'], (int) end($parts), ImageType::getFormattedName('home'));
-            }
-            $out[] = [
-                'id' => $l['id'],
-                'item' => $item,
-                'quantity' => (int) $p['cart_quantity'],
-                'totals' => [
-                    ['type' => 'subtotal', 'amount' => $total, 'display_text' => 'Sous-total TTC'],
-                    ['type' => 'total', 'amount' => $total, 'display_text' => 'Total TTC'],
-                ],
-            ];
-        }
-
-        return $out;
-    }
-
-    private static function cents($v)
-    {
-        return (int) round(((float) $v) * 100);
-    }
 
     /* ================================== Paniers ================================== */
 
@@ -287,12 +164,12 @@ class UcpBridgeCart
 
     public function createCart(array $body)
     {
-        list($lines, $errors) = $this->resolveLines($body['line_items'] ?? null);
+        list($lines, $errors) = $this->lines->resolveLines($body['line_items'] ?? null);
         if ($errors) {
             return [200, $this->errorDoc($errors, ['dev.ucp.shopping.cart'])];
         }
-        $cart = $this->newPsCart();
-        if (!$this->fillCart($cart, $lines)) {
+        $cart = $this->lines->newPsCart();
+        if (!$this->lines->fillCart($cart, $lines)) {
             return [200, $this->errorDoc([UcpBridgeMessage::error('out_of_stock', 'Impossible d\'ajouter les articles au panier', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
         }
         if ($this->caller->idUser) {
@@ -310,7 +187,7 @@ class UcpBridgeCart
                 'user_customer' => $this->caller->idUser],
             'expires_at' => date('Y-m-d H:i:s', time() + self::TTL),
         ];
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         $msgs = $this->discounts()->sync($s, $cart, $body['discounts']['codes'] ?? [], false);
         $this->store->save($s);
 
@@ -345,10 +222,10 @@ class UcpBridgeCart
             return $this->errorDoc([UcpBridgeMessage::error('not_found', 'Panier expiré ou annulé', 'unrecoverable')], ['dev.ucp.shopping.cart']);
         }
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
-        $lines = $this->renderLines($cart, $s['payload']['lines']);
-        $totals = UcpBridgeTotals::cart(self::cents($cart->getOrderTotal(true, Cart::ONLY_PRODUCTS)),
-            self::cents($cart->getOrderTotal(true, Cart::BOTH_WITHOUT_SHIPPING)));
+        $this->lines->bindContext($cart);
+        $lines = $this->lines->renderLines($cart, $s['payload']['lines']);
+        $totals = UcpBridgeTotals::cart(UcpBridgeCartLines::cents($cart->getOrderTotal(true, Cart::ONLY_PRODUCTS)),
+            UcpBridgeCartLines::cents($cart->getOrderTotal(true, Cart::BOTH_WITHOUT_SHIPPING)));
         $exp = strtotime($s['expires_at']);
         $doc = [
             'ucp' => $this->cartEnvelope(),
@@ -396,7 +273,7 @@ class UcpBridgeCart
         if ('active' !== $s['status'] && 'updating' !== $s['status']) {
             return [200, $this->cartDoc($s)];
         }
-        list($lines, $errors) = $this->resolveLines($body['line_items'] ?? null);
+        list($lines, $errors) = $this->lines->resolveLines($body['line_items'] ?? null);
         if ($errors) {
             return [200, $this->errorDoc($errors, ['dev.ucp.shopping.cart'])];
         }
@@ -419,12 +296,12 @@ class UcpBridgeCart
 
                 return [200, $this->errorDoc([UcpBridgeMessage::error('not_found', 'Ce panier a déjà donné lieu à une commande', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
             }
-            $this->fillCart($cart, $lines);
+            $this->lines->fillCart($cart, $lines);
             $s['payload']['lines'] = $lines;
             if (isset($body['buyer'])) {
                 $s['payload']['buyer'] = $body['buyer'];
             }
-            $this->bindContext($cart);
+            $this->lines->bindContext($cart);
             $msgs = $this->discounts()->sync($s, $cart, $body['discounts']['codes'] ?? null, false);
         } catch (Throwable $e) {
             $this->store->save($s, ['updating']);
@@ -473,12 +350,12 @@ class UcpBridgeCart
                 $body['discounts'] = ['codes' => $c['payload']['discount_codes']];
             }
         }
-        list($lines, $errors) = $this->resolveLines($lineItems);
+        list($lines, $errors) = $this->lines->resolveLines($lineItems);
         if ($errors) {
             return [200, $this->errorDoc($errors, ['dev.ucp.shopping.checkout'])];
         }
-        $cart = $this->newPsCart();
-        if (!$this->fillCart($cart, $lines)) {
+        $cart = $this->lines->newPsCart();
+        if (!$this->lines->fillCart($cart, $lines)) {
             return [200, $this->errorDoc([UcpBridgeMessage::error('out_of_stock', 'Impossible d\'ajouter les articles', 'unrecoverable')], ['dev.ucp.shopping.checkout'])];
         }
         $s = [
@@ -538,13 +415,13 @@ class UcpBridgeCart
     private function applyUpdate(array &$s, Cart $cart, array $body, $replaceLines)
     {
         $msgs = [];
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         if ($replaceLines && isset($body['line_items'])) {
-            list($lines, $errors) = $this->resolveLines($body['line_items']);
+            list($lines, $errors) = $this->lines->resolveLines($body['line_items']);
             if ($errors) {
                 $msgs = array_merge($msgs, $errors);
             } else {
-                $this->fillCart($cart, $lines);
+                $this->lines->fillCart($cart, $lines);
                 $s['payload']['lines'] = $lines;
             }
         }
@@ -711,7 +588,7 @@ class UcpBridgeCart
         if (!$cart->id_address_delivery) {
             return [];
         }
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         $list = $cart->getDeliveryOptionList(null, true);
         $out = [];
         foreach ($list[(int) $cart->id_address_delivery] ?? [] as $key => $opt) {
@@ -727,7 +604,7 @@ class UcpBridgeCart
                 'id' => 'carrier_' . $idCarrier,
                 'title' => (string) $carrier->name,
                 'description' => $delay,
-                'totals' => [['type' => 'total', 'amount' => self::cents($opt['total_price_with_tax']), 'display_text' => 'TTC']],
+                'totals' => [['type' => 'total', 'amount' => UcpBridgeCartLines::cents($opt['total_price_with_tax']), 'display_text' => 'TTC']],
             ];
         }
 
@@ -806,7 +683,7 @@ class UcpBridgeCart
             'user_agent' => substr((string) $userAgent, 0, 255),
         ];
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         $s['status'] = $this->computeStatus($s, $cart);
         $this->store->save($s);
 
@@ -821,10 +698,10 @@ class UcpBridgeCart
         $country = $cart->id_address_delivery ? Country::getIsoById((int) (new Address((int) $cart->id_address_delivery))->id_country) : null;
 
         return UcpBridgeTotals::checkout(
-            self::cents($cart->getOrderTotal(false, Cart::ONLY_PRODUCTS)),
-            $hasCarrier ? self::cents($cart->getOrderTotal(false, Cart::ONLY_SHIPPING)) : null,
-            self::cents($cart->getOrderTotal(false, $mode)),
-            self::cents($cart->getOrderTotal(true, $mode)),
+            UcpBridgeCartLines::cents($cart->getOrderTotal(false, Cart::ONLY_PRODUCTS)),
+            $hasCarrier ? UcpBridgeCartLines::cents($cart->getOrderTotal(false, Cart::ONLY_SHIPPING)) : null,
+            UcpBridgeCartLines::cents($cart->getOrderTotal(false, $mode)),
+            UcpBridgeCartLines::cents($cart->getOrderTotal(true, $mode)),
             $country
         );
     }
@@ -832,8 +709,8 @@ class UcpBridgeCart
     public function checkoutDoc(array $s, array $extraMsgs = [])
     {
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
-        $lines = $this->renderLines($cart, $s['payload']['lines']);
+        $this->lines->bindContext($cart);
+        $lines = $this->lines->renderLines($cart, $s['payload']['lines']);
         $liIds = array_column($lines, 'id');
         $doc = [
             'ucp' => $this->checkoutEnvelope(),
@@ -950,7 +827,7 @@ class UcpBridgeCart
             return [200, $this->checkoutDoc($s)];
         }
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         $status = $this->computeStatus($s, $cart);
         if ('ready_for_complete' !== $status) {
             $s['status'] = $status;
@@ -1036,36 +913,16 @@ class UcpBridgeCart
         return [200, $this->checkoutDoc($s)];
     }
 
-    /** Lignes du panier PrestaShop cohérentes avec celles de la session (chaque ligne présente, quantité suffisante). */
-    private function cartMatchesSession(array $s, Cart $cart)
-    {
-        $qty = [];
-        foreach ($cart->getProducts(true) as $p) {
-            $k = (int) $p['id_product'] . '-' . (int) $p['id_product_attribute'];
-            $qty[$k] = ($qty[$k] ?? 0) + (int) $p['cart_quantity'];
-        }
-        if (!$qty || empty($s['payload']['lines'])) {
-            return false;
-        }
-        foreach ($s['payload']['lines'] as $l) {
-            if (($qty[$l['id_product'] . '-' . $l['id_product_attribute']] ?? 0) < (int) $l['quantity']) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
     /** Dans la réservation : contrôles, débit, création de la commande. */
     private function chargeAndOrder(array $s, array $instr, UcpBridgePaymentProvider $provider)
     {
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         // Dernière revalidation des codes promo avant de débiter.
         $this->discounts()->sync($s, $cart, null, true);
         Cart::resetStaticCache();
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         $customer = new Customer((int) $cart->id_customer);
 
         // Contrôles avant débit : panier sans commande, client et clé de sécurité inchangés depuis la caisse.
@@ -1087,8 +944,8 @@ class UcpBridgeCart
             return $this->releaseWithoutCharge($s, $cart, []);
         }
         $amount = (float) $cart->getOrderTotal(true, Cart::BOTH);
-        $cents = self::cents($amount);
-        if ($cents <= 0 || !$this->cartMatchesSession($s, $cart)) {
+        $cents = UcpBridgeCartLines::cents($amount);
+        if ($cents <= 0 || !$this->lines->cartMatchesSession($s, $cart)) {
             PrestaShopLogger::addLog('ucpbridge session ' . $s['id_session'] . ' : panier ' . (int) $cart->id
                 . ' vide, à montant nul ou différent de la session, finalisation refusée sans débit', 2);
 
@@ -1298,7 +1155,7 @@ class UcpBridgeCart
     {
         $id = $s['id_session'];
         $cart = new Cart((int) $s['id_cart']);
-        $this->bindContext($cart);
+        $this->lines->bindContext($cart);
         if ('updating' === $was) {
             // Mise à jour interrompue : le panier reflète ce qui a été écrit, la session redevient modifiable.
             $s['status'] = !empty($s['payload']['escalation_url']) ? 'requires_escalation' : 'incomplete';
@@ -1404,13 +1261,13 @@ class UcpBridgeCart
         }
         foreach ($o->getOrderDetailList() as $d) {
             $key = (int) $d['product_id'] . '-' . (int) $d['product_attribute_id'];
-            $tot = self::cents($d['total_price_tax_incl']);
+            $tot = UcpBridgeCartLines::cents($d['total_price_tax_incl']);
             $lines[] = [
                 'id' => $byKey[$key]['id'] ?? ('li_' . $d['id_order_detail']),
                 'item' => [
                     'id' => $byKey[$key]['requested_id'] ?? $key,
                     'title' => $d['product_name'],
-                    'price' => self::cents($d['unit_price_tax_incl']),
+                    'price' => UcpBridgeCartLines::cents($d['unit_price_tax_incl']),
                     'variant_id' => $key,
                     'sku' => $d['product_reference'],
                 ],
@@ -1422,8 +1279,8 @@ class UcpBridgeCart
         $a = new Address((int) $o->id_address_delivery);
         $carrier = new Carrier((int) $o->id_carrier, (int) $this->context->language->id);
         $state = new OrderState((int) $o->current_state, (int) $this->context->language->id);
-        $totals = UcpBridgeTotals::order(self::cents($o->total_products), self::cents($o->total_shipping_tax_excl),
-            self::cents($o->total_discounts_tax_excl), self::cents($o->total_paid_tax_incl));
+        $totals = UcpBridgeTotals::order(UcpBridgeCartLines::cents($o->total_products), UcpBridgeCartLines::cents($o->total_shipping_tax_excl),
+            UcpBridgeCartLines::cents($o->total_discounts_tax_excl), UcpBridgeCartLines::cents($o->total_paid_tax_incl));
 
         return [200, [
             'ucp' => UcpBridgeMessage::envelope(['dev.ucp.shopping.order'], Ucpbridge::UCP_VERSION),
