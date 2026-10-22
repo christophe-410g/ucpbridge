@@ -1,0 +1,9 @@
+{shop_name}
+
+Bonjour {firstname} {lastname},
+
+Nous accusons réception de votre demande de rétractation pour la commande {order_name}, enregistrée le {withdrawal_date}.
+Nous revenons vers vous avec les modalités de retour des articles. Le remboursement intervient au plus tard 14 jours après réception de votre demande.
+Conservez cet e-mail : il constitue la preuve de votre demande.
+
+{shop_name}, {shop_url}

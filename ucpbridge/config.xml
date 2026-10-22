@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE. -->
+<module>
+    <name>ucpbridge</name>
+    <displayName><![CDATA[UCP Bridge pour PrestaShop]]></displayName>
+    <version><![CDATA[0.1.2]]></version>
+    <description><![CDATA[Universal Commerce Protocol : profil, panier transférable, caisse native, déclinaisons, CGV et preuve, MCP.]]></description>
+    <author><![CDATA[Friends of Presta (Christophe Vidal)]]></author>
+    <tab><![CDATA[payments_gateways]]></tab>
+    <is_configurable>1</is_configurable>
+    <need_instance>0</need_instance>
+    <limited_countries></limited_countries>
+</module>

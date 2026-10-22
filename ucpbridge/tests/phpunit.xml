@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE. -->
+<phpunit bootstrap="bootstrap.php" colors="false" failOnWarning="true" failOnRisky="true">
+  <testsuites>
+    <testsuite name="unit">
+      <directory>Unit</directory>
+    </testsuite>
+  </testsuites>
+</phpunit>

@@ -1,0 +1,43 @@
+name: bench-ucp-bridge
+# Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
+# Banc UCP n°3 : prototype ucpbridge (podcast Contrib.), port 8092
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: bench
+      MYSQL_DATABASE: prestashop
+    volumes:
+      - db:/var/lib/mysql
+  prestashop:
+    image: prestashop/prestashop:9.1.5
+    depends_on: [mysql]
+    environment:
+      DB_SERVER: mysql
+      DB_NAME: prestashop
+      DB_USER: root
+      DB_PASSWD: bench
+      PS_INSTALL_AUTO: 1
+      PS_DOMAIN: localhost:8092
+      PS_LANGUAGE: fr
+      PS_COUNTRY: FR
+      PS_DEV_MODE: 0
+      ADMIN_MAIL: demo@contrib.test
+      ADMIN_PASSWD: ContribBench2026
+    ports:
+      - "8092:80"
+    volumes:
+      - ps:/var/www/html
+  # Faux Stripe local (image officielle) : aucune vraie carte, aucun appel vers api.stripe.com.
+  stripe-mock:
+    image: stripe/stripe-mock:latest
+    ports:
+      - "12111:12111"
+  # Capteur d'e-mails local : SMTP 1025 (réseau du banc), interface web http://localhost:8025. Rien ne sort.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "8025:8025"
+volumes:
+  db:
+  ps:
