@@ -216,20 +216,25 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   | Catégorie | Défaut | Point de départ | Traitement |
   |---|---|---|---|
   | Sessions de caisse et paniers UCP terminés ou expirés | 30 j | dernière activité | supprimés avec leur panier PrestaShop sans commande (visiteur sans compte) et leur adresse sans client ; une session terminée par une commande est gardée sans les données personnelles de l'acheteur (`buyer`, `consent`, `destination`, `terms_acceptance`, `context`) |
-  | Clients invités créés par le module, sans aucune commande | 30 j | création | supprimés (`Customer::delete` : adresses inutilisées, paniers sans commande) |
+  | Clients invités créés par le module, sans aucune commande | 30 j | création | supprimés (`Customer::delete` : adresses inutilisées, paniers sans commande) ; jamais tant qu'ils ont une session en échec (acheteur peut-être à rembourser) |
   | Codes et jetons OAuth expirés ou révoqués | 30 j | expiration, ou émission pour un jeton révoqué | supprimés |
-  | Journal des paiements | 3650 j | opération | supprimé ; sessions en échec (incident de paiement) gardées aussi longtemps |
-  | Journal de preuve et demandes de rétractation | 3650 j | enregistrement | supprimés |
+  | Journal des paiements | 3650 j (minimum) | opération | supprimé ; sessions en échec (incident de paiement : débit non remboursé ou incertain) et leur acheteur invité gardés aussi longtemps |
+  | Journal de preuve et demandes de rétractation | 3650 j (minimum) | enregistrement | supprimés |
 
   10 ans pour les paiements (pièces comptables, article L123-22 du Code de commerce) et pour les preuves (contrats
   conclus par voie électronique à partir de 120 euros, articles L213-1 et D213-2 du Code de la consommation). Les clés
-  d'idempotence (24 h) sont purgées au passage. Jamais touchés : les commandes passées, leurs clients (même invités) et
+  d'idempotence (24 h) sont purgées au passage. Ces deux durées légales ne descendent jamais sous 3650 jours (0, jamais
+  purgé, reste permis) : une durée plus courte est refusée à l'enregistrement, et si elle est écrite en base par un autre
+  moyen, la purge refuse de tourner (message d'erreur au back-office, code de sortie 2 en ligne de commande) sans rien
+  supprimer. Jamais touchés : les commandes passées, leurs clients (même invités) et
   leurs adresses, les sessions en cours de finalisation ou de rapprochement, les paniers et adresses des clients avec
   compte. Les invités créés par le module sont enregistrés dans `ps_ucpbridge_customer` (ceux de la 0.1.2 sont repris
   depuis les sessions à la mise à jour) : un client créé autrement n'est jamais purgé par le module.
   Purge : `php modules/ucpbridge/bin/purge.php` (tâche cron quotidienne ; `--dry-run` pour une simulation) ou boutons
   « Simuler la purge » et « Purger maintenant » de la configuration. Compte rendu chiffré par catégorie, aussi consigné
-  au journal PrestaShop (« ucpbridge purge RGPD »).
+  au journal PrestaShop (« ucpbridge purge RGPD ») : il compte aussi les paniers et adresses supprimés avec un invité,
+  et la simulation donne les mêmes nombres que la purge. Sessions lues par lots de 500, sans relire celles dont les
+  données personnelles sont déjà retirées.
 
 ### Transport MCP
 

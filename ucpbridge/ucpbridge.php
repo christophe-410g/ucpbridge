@@ -715,7 +715,9 @@ class Ucpbridge extends PaymentModule
         $fields = '';
         $days = UcpBridgePurge::durations();
         foreach (UcpBridgeRetention::CATEGORIES as $cat => $c) {
-            $fields .= '<p><label>' . $esc($c[2]) . ' (jours, défaut ' . (int) $c[1] . ', 0 = jamais purgé)</label><br>'
+            $min = UcpBridgeRetention::LEGAL_MIN_DAYS[$cat] ?? 0;
+            $fields .= '<p><label>' . $esc($c[2]) . ' (jours, défaut ' . (int) $c[1] . ($min ? ', minimum légal ' . (int) $min : '')
+                . ', 0 = jamais purgé)</label><br>'
                 . '<input type="number" min="0" max="' . UcpBridgeRetention::MAX_DAYS . '" class="form-control" style="width:140px" name="'
                 . $esc($c[0]) . '" value="' . (int) $days[$cat] . '"></p>';
         }
@@ -745,11 +747,15 @@ class Ucpbridge extends PaymentModule
         }
         if (Tools::isSubmit('submitUcpbridgeRetention')) {
             $values = [];
-            foreach (UcpBridgeRetention::CATEGORIES as $c) {
+            foreach (UcpBridgeRetention::CATEGORIES as $cat => $c) {
                 $v = UcpBridgeRetention::normalizeDays(Tools::getValue($c[0]));
                 if (null === $v) {
                     return $this->displayError('Durée de conservation invalide (' . $c[2] . ') : un nombre entier de jours, de 0 à '
                         . UcpBridgeRetention::MAX_DAYS . '. Aucune durée modifiée.');
+                }
+                if (UcpBridgeRetention::tooShort($cat, $v)) {
+                    // Durée légale (paiements, preuves) : jamais sous le plancher, une faute de frappe effacerait des pièces.
+                    return $this->displayError(UcpBridgeRetention::tooShortMessage($cat));
                 }
                 $values[$c[0]] = $v;
             }
@@ -758,6 +764,9 @@ class Ucpbridge extends PaymentModule
             }
 
             return $this->displayConfirmation('Durées de conservation enregistrées.');
+        }
+        if ($bad = UcpBridgePurge::refusedDurations()) {
+            return $this->displayError(UcpBridgeRetention::purgeRefusedMessage($bad));
         }
         $dry = Tools::isSubmit('submitUcpbridgePurgeDry');
         $lines = '';

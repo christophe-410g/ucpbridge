@@ -32,7 +32,12 @@ Nouveautés
   expirés supprimés avec leur panier PrestaShop sans commande et leur adresse sans client ; sessions terminées par une
   commande gardées sans les données personnelles de l'acheteur ; clients invités créés par le module et sans aucune
   commande supprimés, ceux qui ont commandé jamais ; codes et jetons OAuth expirés ou révoqués ; journal des paiements,
-  preuves et rétractations après 10 ans ; clés d'idempotence de plus de 24 h. Aucune commande touchée. Nouvelle table
+  preuves et rétractations après 10 ans ; clés d'idempotence de plus de 24 h. Aucune commande touchée. Une session en
+  échec (débit non remboursé ou incertain) et son acheteur invité suivent la durée du journal des paiements : jamais
+  supprimés avant. Durées du journal des paiements et des preuves jamais sous 3650 jours (0 = jamais reste permis) :
+  refus à l'enregistrement, et purge refusée sans rien supprimer si la configuration est en dessous. Compte rendu
+  exact (paniers et adresses supprimés avec un invité comptés, simulation identique à la purge) ; sessions lues par
+  lots, celles déjà minimisées écartées en SQL ; aucune commande vérifiée avant toute suppression. Nouvelle table
   `ps_ucpbridge_customer` (invités créés par le module, renseignée à la création de l'invité, reprise depuis les
   sessions à la mise à jour depuis la 0.1.2, conservée à la désinstallation avec les preuves).
 
