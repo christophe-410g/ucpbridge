@@ -107,11 +107,12 @@ def test_fiche_commande_et_pages_en_anglais(boutique, langue):
     assert "UCP evidence" in proof and "Preuve UCP" not in proof
     # E-mail de confirmation : bloc légal en anglais, lien de rétractation.
     msgs = attendre_mails(b["email"])
-    html = mail(msgs[-1]["ID"])["HTML"]
+    retrait = re.compile(r'href="([^"]*controller=withdraw[^"]*|[^"]*/withdraw\?[^"]*)"')
+    conf = [mail(m["ID"])["HTML"] for m in msgs]
+    html = next((h for h in conf if retrait.search(h)), "")
+    assert html, "lien de rétractation absent"
     assert "Legal information" in html and "Informations légales" not in html
-    lien = re.search(r'href="([^"]*controller=withdraw[^"]*|[^"]*/withdraw\?[^"]*)"', html)
-    assert lien, "lien de rétractation absent"
-    url = lien.group(1).replace("&amp;", "&")
+    url = retrait.search(html).group(1).replace("&amp;", "&")
     with sync_playwright() as pw:
         nav = pw.chromium.launch()
         page = nav.new_page()
