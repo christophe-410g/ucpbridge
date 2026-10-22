@@ -1000,6 +1000,10 @@ class UcpBridgeCart
         if ('canceled' !== self::exposedStatus($s['status'])) {
             $messages = array_merge($messages, $this->disclosures($s['payload']['destination']['address_country'] ?? null));
         }
+        if ('complete_in_progress' === $s['status'] && !empty($s['payload']['charge_unknown'])) {
+            $messages[] = self::msg('payment_verification', 'Résultat du paiement inconnu : ne pas relancer avec un autre moyen de paiement, '
+                . 'le marchand vérifie auprès du prestataire de paiement et rembourse si un débit a eu lieu', 'requires_buyer_input');
+        }
         if ('requires_escalation' === $s['status'] && !empty($s['payload']['escalation_url'])) {
             $messages[] = self::msg('requires_3ds', 'Authentification forte (3-D Secure) requise : l\'acheteur doit finir le paiement sur la boutique', 'requires_buyer_input');
         }
@@ -1107,6 +1111,11 @@ class UcpBridgeCart
             return $this->chargeAndOrder($s, $instr, $provider);
         } catch (Throwable $e) {
             $charged = $this->charged;
+            $cur = null === $charged ? $this->load($s['id_session'], 'checkout') : null;
+            if ($cur && 'complete_in_progress' === $cur['status'] && !empty($cur['payload']['charge_started_at'])) {
+                // Exception pendant ou juste après l'appel au prestataire : débit possible, la session reste réservée.
+                return $this->chargeUnknown($cur, $cur['payload']['charge_provider'] ?? '?', $e->getMessage());
+            }
             if (null === $charged) {
                 // Rien n'a été débité : la session redevient finalisable.
                 unset($s['payload']['charge_started_at']);
@@ -1131,6 +1140,22 @@ class UcpBridgeCart
         $this->save($s, ['complete_in_progress']);
 
         return [200, $this->checkoutDoc($s, $msgs)];
+    }
+
+    /**
+     * Débit engagé au résultat inconnu (délai dépassé, connexion coupée, erreur 5xx, exception de l'adaptateur) : la
+     * carte a pu être débitée. Jamais de retour à ready_for_complete : la session reste réservée avec la trace du débit
+     * engagé (charge_started_at), et le rapprochement la classera en débit incertain, à vérifier chez le prestataire.
+     */
+    private function chargeUnknown(array $s, $providerName, $reason)
+    {
+        $s['payload']['charge_unknown'] = true;
+        $this->save($s, ['complete_in_progress']);
+        PrestaShopLogger::addLog('ucpbridge incident : session ' . $s['id_session'] . ', résultat du débit inconnu (' . $providerName
+            . ', clé d\'idempotence ' . ($s['payload']['charge_idempotency_key'] ?? '?') . ') : ' . $reason
+            . ' ; session laissée en finalisation, à rapprocher et à vérifier chez le prestataire', 3);
+
+        return [200, $this->checkoutDoc($s)];
     }
 
     /** Lignes du panier PrestaShop cohérentes avec celles de la session (chaque ligne présente, quantité suffisante). */
@@ -1212,7 +1237,11 @@ class UcpBridgeCart
             'buyer' => $s['payload']['buyer'] ?? [],
             'continue_url' => $this->module->buildContinueUrl((int) $cart->id),
         ]);
-        UcpBridgeProof::payment($s['id_session'], $provider->getName(), 'charge', $pay->status, $pay->transactionId, $cents, $currency->iso_code, $pay->message);
+        if (UcpBridgePaymentResult::SUCCEEDED === $pay->status) {
+            // Débit mémorisé AVANT toute écriture : une erreur ensuite ne fait jamais croire à « rien de débité ».
+            $this->charged = ['transaction_id' => $pay->transactionId, 'amount' => $cents, 'currency' => $currency->iso_code];
+        }
+        $this->journalPayment($s['id_session'], $provider->getName(), 'charge', $pay->status, $pay->transactionId, $cents, $currency->iso_code, $pay->message);
         if (UcpBridgePaymentResult::REQUIRES_ACTION === $pay->status) {
             unset($s['payload']['charge_started_at']);
             $s['status'] = 'requires_escalation';
@@ -1220,6 +1249,9 @@ class UcpBridgeCart
             $this->save($s, ['complete_in_progress']);
 
             return [200, $this->checkoutDoc($s)];
+        }
+        if (UcpBridgePaymentResult::UNKNOWN === $pay->status) {
+            return $this->chargeUnknown($s, $provider->getName(), $pay->message);
         }
         if (UcpBridgePaymentResult::SUCCEEDED !== $pay->status) {
             // Refus du prestataire, aucun débit : la session redevient finalisable avec un autre moyen.
@@ -1231,7 +1263,7 @@ class UcpBridgeCart
 
             return [200, $this->checkoutDoc($s, [self::msg('payment_failed', $pay->message, 'recoverable', '$.payment.instruments[0].credential')])];
         }
-        $charged = $this->charged = ['transaction_id' => $pay->transactionId, 'amount' => $cents, 'currency' => $currency->iso_code];
+        $charged = $this->charged;
         $error = null;
         try {
             $this->module->validateOrder((int) $cart->id, (int) Configuration::get('PS_OS_PAYMENT'), $amount, $pay->label,
@@ -1315,7 +1347,7 @@ class UcpBridgeCart
             $refund = UcpBridgePaymentResult::fail($e->getMessage());
         }
         $ok = $refund && UcpBridgePaymentResult::SUCCEEDED === $refund->status;
-        UcpBridgeProof::payment($s['id_session'], $provider->getName(), 'refund', $ok ? 'succeeded' : 'failed',
+        $this->journalPayment($s['id_session'], $provider->getName(), 'refund', $ok ? 'succeeded' : 'failed',
             $refund ? $refund->transactionId : '', $charged['amount'], $charged['currency'], $refund ? $refund->message : '');
         PrestaShopLogger::addLog('ucpbridge incident (' . $origin . ') : session ' . $s['id_session'] . ', débit ' . $charged['transaction_id']
             . ' (' . $provider->getName() . ', ' . $charged['amount'] . ' centimes) réussi mais commande non créée : ' . $reason . ' ; remboursement '
@@ -1327,6 +1359,26 @@ class UcpBridgeCart
         $this->save($s, ['complete_in_progress', 'reconciling']);
 
         return [200, $this->checkoutDoc($s)];
+    }
+
+    /**
+     * Écriture au journal des paiements qui ne fait jamais échouer la caisse : un débit ou un remboursement a déjà eu
+     * lieu chez le prestataire, une erreur de base de données ne doit ni l'effacer ni interrompre la commande. L'échec
+     * est signalé au journal PrestaShop avec la référence de l'opération.
+     */
+    private function journalPayment($sessionId, $providerName, $operation, $status, $transactionId, $amount, $currency, $message = '')
+    {
+        $error = 'insertion refusée';
+        try {
+            if (UcpBridgeProof::payment($sessionId, $providerName, $operation, $status, $transactionId, $amount, $currency, $message)) {
+                return;
+            }
+        } catch (Throwable $e) {
+            $error = $e->getMessage();
+        }
+        PrestaShopLogger::addLog('ucpbridge journal des paiements indisponible : session ' . $sessionId . ', ' . $operation . ' ' . $status
+            . ' ' . $transactionId . ' (' . $providerName . ', ' . (int) $amount . ' centimes ' . $currency . ') non journalisé : '
+            . substr(strip_tags((string) $error), 0, 300), 3);
     }
 
     /* ========================== Rapprochement des sessions bloquées ========================== */

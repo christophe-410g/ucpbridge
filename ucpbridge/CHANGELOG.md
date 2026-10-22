@@ -10,6 +10,15 @@ Corrections
   montant en centimes, la devise et un numéro de tentative (`charge_attempt`, incrémenté après chaque refus
   définitif). Un panier modifié ou un nouvel essai avec la même carte après un refus n'est plus rejeté par Stripe
   (paramètres différents) ni ne reçoit le refus mis en cache 24 h.
+- Paiement (#2) : un débit réussi est mémorisé (`$this->charged`) dès la réponse du prestataire, avant toute
+  écriture au journal des paiements. Une erreur du journal (`ps_ucpbridge_payment`) n'interrompt plus la caisse :
+  la commande est créée, l'échec du journal est signalé au journal PrestaShop (gravité 3) avec la référence du débit,
+  et une exception ultérieure mène au remboursement automatique au lieu de faire croire que rien n'a été débité.
+- Paiement (#1) : un débit au résultat inconnu (délai dépassé, connexion coupée, réponse 5xx sans charge, exception
+  de l'adaptateur pendant le débit) n'est plus traité comme un refus. Nouveau statut `UcpBridgePaymentResult::UNKNOWN`
+  (`UcpBridgePaymentResult::unknown()`) ; la session reste `complete_in_progress` avec `charge_started_at`, l'agent
+  reçoit `payment_verification` et le rapprochement la classe en « débit incertain, à vérifier chez le prestataire ».
+  Une erreur cURL survenue avant l'envoi (connexion refusée, nom d'hôte introuvable) reste un refus sans débit.
 
 ## 0.1.2-beta (2026-10-21) : première publication
 
