@@ -94,17 +94,31 @@ class UcpBridgeApiKeys
 
     public static function all()
     {
+        $keys = [];
+        self::migrateLegacy($keys);
+
+        return $keys;
+    }
+
+    /**
+     * Migration de la clé unique des versions précédentes (module mis à jour sans réinstallation), faite à la première
+     * lecture et en tête de la mise à jour. L'ancienne clé n'est supprimée qu'après l'enregistrement réussi de la
+     * nouvelle liste : si l'écriture échoue, elle reste en place (et acceptée, $keys la contient) et la migration est
+     * retentée à la lecture suivante. $keys reçoit les clés à utiliser.
+     *
+     * @return bool false si la migration n'a pas pu être enregistrée
+     */
+    public static function migrateLegacy(&$keys = null)
+    {
         $keys = json_decode((string) Configuration::get(self::CONFIG), true);
         $keys = is_array($keys) ? $keys : [];
         $legacy = (string) Configuration::get(self::LEGACY);
-        if ('' !== $legacy) {
-            // Migration à la première lecture (module mis à jour sans réinstallation).
-            $keys = self::migrate($keys, $legacy, date('Y-m-d H:i:s'));
-            self::save($keys);
-            Configuration::deleteByName(self::LEGACY);
+        if ('' === $legacy) {
+            return true;
         }
+        $keys = self::migrate($keys, $legacy, date('Y-m-d H:i:s'));
 
-        return $keys;
+        return self::save($keys) && Configuration::deleteByName(self::LEGACY);
     }
 
     private static function save(array $keys)
