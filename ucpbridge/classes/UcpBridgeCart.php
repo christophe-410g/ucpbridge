@@ -32,6 +32,8 @@ class UcpBridgeCart
     private $store;
     /** @var UcpBridgeCartLines */
     private $lines;
+    /** @var UcpBridgeBuyer */
+    private $buyer;
 
     public function __construct(Context $context, Ucpbridge $module)
     {
@@ -41,6 +43,7 @@ class UcpBridgeCart
         $this->caller = new UcpBridgeCaller();
         $this->store = new UcpBridgeSessionStore($this->caller);
         $this->lines = new UcpBridgeCartLines($context, $this->catalog);
+        $this->buyer = new UcpBridgeBuyer($context, $this->caller);
     }
 
     public function catalog()
@@ -92,41 +95,6 @@ class UcpBridgeCart
     public static function exposedStatus($status)
     {
         return UcpBridgeSessionStore::exposedStatus($status);
-    }
-
-    /** Rattache le panier au vrai client : identité, adresse enregistrée proposée par défaut. */
-    private function attachUser(array &$s, Cart $cart)
-    {
-        $c = new Customer($this->caller->idUser);
-        if (!Validate::isLoadedObject($c) || $c->is_guest || !$c->active) {
-            return;
-        }
-        $s['payload']['user_customer'] = (int) $c->id;
-        $s['payload']['id_customer'] = (int) $c->id;
-        $s['payload']['buyer'] = ['email' => $c->email, 'first_name' => $c->firstname, 'last_name' => $c->lastname];
-        $cart->id_customer = (int) $c->id;
-        $cart->secure_key = $c->secure_key;
-        $this->context->customer = $c;
-        $idAddress = (int) Address::getFirstCustomerAddressId((int) $c->id);
-        if ($idAddress) {
-            $a = new Address($idAddress);
-            $s['payload']['id_address'] = $idAddress;
-            $s['payload']['address_saved'] = true;
-            $s['payload']['destination'] = [
-                'id' => 'addr_' . $idAddress,
-                'first_name' => $a->firstname, 'last_name' => $a->lastname,
-                'street_address' => $a->address1, 'extended_address' => (string) $a->address2,
-                'address_locality' => $a->city, 'postal_code' => $a->postcode,
-                'address_country' => Country::getIsoById((int) $a->id_country),
-            ];
-            $cart->id_address_delivery = $idAddress;
-            $cart->id_address_invoice = $idAddress;
-        }
-        $cart->update();
-        if ($idAddress) {
-            Db::getInstance()->update('cart_product', ['id_address_delivery' => $idAddress], 'id_cart = ' . (int) $cart->id);
-        }
-        Cart::resetStaticCache();
     }
 
     /* ============================ Stockage sessions ============================ */
@@ -368,7 +336,7 @@ class UcpBridgeCart
             'expires_at' => date('Y-m-d H:i:s', time() + self::TTL),
         ];
         if ($this->caller->idUser) {
-            $this->attachUser($s, $cart);
+            $this->buyer->attachUser($s, $cart);
         }
         if (!isset($body['discounts'])) {
             $body['discounts'] = ['codes' => []];
@@ -441,7 +409,7 @@ class UcpBridgeCart
                 unset($b['email']);
             }
             $s['payload']['buyer'] = array_merge($s['payload']['buyer'] ?? [], array_intersect_key($b, array_flip(['email', 'first_name', 'last_name', 'phone_number'])));
-            $this->syncCustomer($s, $cart);
+            $this->buyer->syncCustomer($s, $cart);
         }
         $method = $body['fulfillment']['methods'][0] ?? null;
         if (is_array($method)) {
@@ -478,53 +446,6 @@ class UcpBridgeCart
         return $msgs;
     }
 
-    private function syncCustomer(array &$s, Cart $cart)
-    {
-        $b = $s['payload']['buyer'] ?? [];
-        if (empty($b['email'])) {
-            return;
-        }
-        $c = !empty($s['payload']['id_customer']) ? new Customer((int) $s['payload']['id_customer']) : new Customer();
-        $c->email = $b['email'];
-        $c->firstname = $this->cleanName($b['first_name'] ?? ($s['payload']['destination']['first_name'] ?? 'Client'));
-        $c->lastname = $this->cleanName($b['last_name'] ?? ($s['payload']['destination']['last_name'] ?? 'UCP'));
-        if (!Validate::isLoadedObject($c)) {
-            // Client invité : pas de compte, mot de passe aléatoire jamais communiqué.
-            $c->is_guest = 1;
-            $c->newsletter = 0; // aucun consentement présumé : seul buyer.consent.marketing = true l'active
-            $c->optin = 0;
-            $c->passwd = password_hash(bin2hex(random_bytes(16)), PASSWORD_BCRYPT);
-            $c->id_default_group = (int) Configuration::get('PS_GUEST_GROUP');
-            $c->id_shop = (int) $this->context->shop->id;
-            $c->id_lang = (int) $this->context->language->id;
-            $c->add();
-            $c->updateGroup([(int) Configuration::get('PS_GUEST_GROUP')]);
-            $s['payload']['id_customer'] = (int) $c->id;
-            // Invité créé par le module : purgé s'il ne commande pas (durée de conservation, UcpBridgePurge).
-            UcpBridgePurge::recordGuest((int) $c->id);
-        } else {
-            $c->update();
-        }
-        $cart->id_customer = (int) $c->id;
-        $cart->secure_key = $c->secure_key;
-        $cart->update();
-        if (!empty($s['payload']['id_address'])) {
-            $a = new Address((int) $s['payload']['id_address']);
-            if (Validate::isLoadedObject($a) && !$a->id_customer) {
-                $a->id_customer = (int) $c->id;
-                $a->update();
-            }
-        }
-        $this->context->customer = $c;
-    }
-
-    private function cleanName($n)
-    {
-        $n = trim(preg_replace('/[0-9!<>,;?=+()@#"°{}_$%:]/u', '', (string) $n));
-
-        return '' !== $n ? Tools::substr($n, 0, 255) : 'Client';
-    }
-
     private function applyDestination(array &$s, Cart $cart, array $d)
     {
         foreach (['street_address', 'address_locality', 'postal_code', 'address_country'] as $f) {
@@ -546,8 +467,8 @@ class UcpBridgeCart
         $buyer = $s['payload']['buyer'] ?? [];
         $a->id_customer = (int) $cart->id_customer;
         $a->alias = 'UCP';
-        $a->firstname = $this->cleanName($d['first_name'] ?? ($buyer['first_name'] ?? 'Client'));
-        $a->lastname = $this->cleanName($d['last_name'] ?? ($buyer['last_name'] ?? 'UCP'));
+        $a->firstname = UcpBridgeBuyer::cleanName($d['first_name'] ?? ($buyer['first_name'] ?? 'Client'));
+        $a->lastname = UcpBridgeBuyer::cleanName($d['last_name'] ?? ($buyer['last_name'] ?? 'UCP'));
         $a->address1 = Tools::substr((string) $d['street_address'], 0, 128);
         $a->address2 = Tools::substr((string) ($d['extended_address'] ?? ''), 0, 128);
         $a->postcode = (string) $d['postal_code'];
@@ -1021,7 +942,7 @@ class UcpBridgeCart
         $this->charged = null; // la commande existe : plus rien à rembourser
         try {
             $consent = $s['payload']['consent'] ?? [];
-            $this->applyConsent((int) $customer->id, $consent);
+            $this->buyer->applyConsent((int) $customer->id, $consent);
             UcpBridgeProof::record([
                 'id_order' => $s['id_order'],
                 'id_cart' => (int) $cart->id,
@@ -1213,27 +1134,6 @@ class UcpBridgeCart
         PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ' bloquée sans débit, rendue (' . $s['status'] . ')', 1);
 
         return 'aucun débit, session rendue (' . $s['status'] . ')';
-    }
-
-    /** Options newsletter et partenaires du client PrestaShop, uniquement sur consentement explicite. */
-    private function applyConsent($idCustomer, array $consent)
-    {
-        $data = [];
-        $nl = UcpBridgeConsent::newsletter($consent);
-        if (null !== $nl) {
-            $data['newsletter'] = (int) $nl;
-            if ($nl) {
-                $data['newsletter_date_add'] = date('Y-m-d H:i:s');
-                $data['ip_registration_newsletter'] = pSQL(Tools::getRemoteAddr());
-            }
-        }
-        $optin = UcpBridgeConsent::partnerOptin($consent);
-        if (null !== $optin) {
-            $data['optin'] = (int) $optin;
-        }
-        if ($data && $idCustomer) {
-            Db::getInstance()->update('customer', $data, 'id_customer = ' . (int) $idCustomer);
-        }
     }
 
     private function orderPermalink($idOrder)
