@@ -5,6 +5,10 @@ des sessions, des commandes, une preuve, une rétractation, des jetons OAuth, pu
 les fichiers et PrestaShop lance la mise à jour (`prestashop:module upgrade`). Tout doit être conservé et marcher, le
 schéma obtenu doit être celui d'une installation fraîche, et le script doit pouvoir être rejoué.
 
+PrestaShop 8 : la 0.1.2 exigeait PrestaShop 9.1.0, aucune boutique PrestaShop 8 n'a donc pu l'installer. Sur ce banc,
+elle est installée en abaissant ce seul minimum (et son jeu de démo en sautant une colonne propre à PrestaShop 9) :
+le test éprouve alors le mécanisme de mise à jour (scripts upgrade/, `prestashop:module upgrade`) sur PrestaShop 8.
+
 Le module reste ensuite installé dans sa version courante (avec les données de la 0.1.2) : les tests suivants
 tournent donc aussi sur une boutique mise à jour.
 
@@ -83,6 +87,9 @@ def installer_sources(source):
         archive = subprocess.run(["git", "-C", BANC, "archive", VERSION_PUBLIEE, "ucpbridge"], capture_output=True, check=True).stdout
         r = subprocess.run(["docker", "exec", "-i", PS, "tar", "-x", "-C", "/var/www/html/modules"], input=archive, capture_output=True)
         assert r.returncode == 0, r.stderr
+        if avant_91():
+            # 0.1.2 installée sur PrestaShop 8 : son minimum déclaré (9.1.0) abaissé, rien d'autre (voir l'en-tête).
+            conteneur("sed -i \"s/'min' => '9.1.0'/'min' => '8.0.0'/\" /var/www/html/modules/ucpbridge/ucpbridge.php")
     else:
         subprocess.run(["docker", "cp", os.path.join(BANC, "ucpbridge"), f"{PS}:/var/www/html/modules/ucpbridge"], check=True,
                        capture_output=True)
@@ -90,9 +97,20 @@ def installer_sources(source):
               "&& rm -rf /var/www/html/var/cache/*")
 
 
+def avant_91():
+    """Boutique antérieure à PrestaShop 9.1 (minimum déclaré par la 0.1.2)."""
+    v = php("echo _PS_VERSION_;").splitlines()[-1]
+    return tuple(int(x) for x in v.split(".")[:2]) < (9, 1)
+
+
 def graine_012():
     """Jeu de démo de la 0.1.2 (celui du commit publié), lancé contre le module 0.1.2."""
     graine = subprocess.run(["git", "-C", BANC, "show", f"{VERSION_PUBLIEE}:seed-demo.php"], capture_output=True, text=True, check=True).stdout
+    # Colonne carrier.id_tax_rules_group absente en PrestaShop 8 : mise à jour sautée si la colonne manque.
+    ligne = "Db::getInstance()->update('carrier', ['id_tax_rules_group' => $idGroup], 'deleted = 0');"
+    assert ligne in graine
+    graine = graine.replace(ligne, "if (Db::getInstance()->executeS('SHOW COLUMNS FROM `' . _DB_PREFIX_ . 'carrier` LIKE \\'id_tax_rules_group\\'')) { "
+                            + ligne + " }")
     r = subprocess.run(["docker", "exec", "-i", "-u", "www-data", PS, "php"], input=graine, capture_output=True, text=True)
     assert r.returncode == 0 and "Client OAuth" in r.stdout, r.stdout + r.stderr
 
