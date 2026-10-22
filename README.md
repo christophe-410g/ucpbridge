@@ -6,7 +6,7 @@ Module PrestaShop qui fait parler une boutique le protocole UCP (Universal Comme
 qu'utilisent Google Universal Cart et les agents d'achat : profil `/.well-known/ucp`, catalogue et déclinaisons,
 panier transférable, caisse native, codes promo, comptes clients (OAuth), CGV, rétractation et serveur MCP.
 
-> **Version bêta 0.1.2, prototype : ne pas utiliser en production.** Non validé par Google, Universal Cart n'est pas
+> **Version bêta 0.1.3, prototype : ne pas utiliser en production.** Non validé par Google, Universal Cart n'est pas
 > encore ouvert en Europe, paiement réel non éprouvé. PrestaShop 8.0 à 9.2, PHP 8.1 minimum. Relectures et contributions
 > bienvenues.
 
@@ -21,6 +21,22 @@ l'association **Friends of Presta**.
   toute version de 8.0 à 9.2 par `PS_IMAGE`) et 221 tests (100 unitaires PHPUnit, 121 d'intégration pytest et
   Playwright).
 - `mcp_client.py` : client MCP minimal pour essayer la boutique comme un agent.
+
+## Compatibilité
+
+| PrestaShop | Image Docker éprouvée | PHP |
+|---|---|---|
+| 8.0 | `8.0.5-8.1-apache` | 8.1 |
+| 8.1 | `8.1.7-8.1-apache` | 8.1 |
+| 8.2 | `8.2.8-8.1-apache` | 8.1 |
+| 9.0 | `9.0.3` | 8.4 |
+| 9.1 | `9.1.5` | 8.5 |
+| 9.2 | `9.2.0` | 8.5 |
+
+PrestaShop 8.0 à 9.2, **PHP 8.1 minimum** : sous un PHP plus ancien, l'installation est refusée avec un message qui
+donne la version trouvée. PrestaShop 1.7 n'est pas pris en charge. Chaque version du tableau passe la suite complète
+(installation, mise à jour depuis la 0.1.2, unitaires, intégration). Détails et limites : `ucpbridge/README.md`,
+section « Compatibilité et code ».
 
 ## Démarrage rapide
 

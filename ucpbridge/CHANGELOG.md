@@ -2,7 +2,7 @@
 
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 
-## 0.1.3-beta (non publiée)
+## 0.1.3-beta (2026-10-22)
 
 Nouveautés
 
@@ -102,6 +102,17 @@ Corrections
   (`UcpBridgePaymentResult::unknown()`) ; la session reste `complete_in_progress` avec `charge_started_at`, l'agent
   reçoit `payment_verification` et le rapprochement la classe en « débit incertain, à vérifier chez le prestataire ».
   Une erreur cURL survenue avant l'envoi (connexion refusée, nom d'hôte introuvable) reste un refus sans débit.
+
+Changements internes
+
+- Intégration continue (#16) : workflow GitHub Actions `.github/workflows/tests.yml` sur chaque pull request, chaque
+  push sur `main` et à la demande, sans aucun secret. Lint PHP (PHP 8.1, 8.3 et 8.5), tests unitaires (8.3 et 8.5),
+  archive installable en artefact, puis suite d'intégration complète sur chaque version de PrestaShop prise en charge
+  (journaux, captures et rapport JUnit en artefact en cas d'échec). `tools/get-phpunit.sh` télécharge PHPUnit 12 épinglé
+  et vérifie sa somme SHA-256. Banc paramétrable (`UCP_PROJECT`, `UCP_PORT`, `MAILPIT_PORT`, `STRIPE_MOCK_PORT`,
+  `UCP_WAIT`) pour faire tourner un second banc à côté du premier ; scripts `.sh` exécutables dans le dépôt.
+- Tests : 221 au total (100 unitaires PHPUnit, 121 d'intégration pytest et Playwright), tous verts sur PrestaShop
+  8.0.5, 8.1.7, 8.2.8, 9.0.3, 9.1.5 et 9.2.0.
 
 ## 0.1.2-beta (2026-10-21) : première publication
 

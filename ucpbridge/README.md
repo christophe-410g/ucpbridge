@@ -1,6 +1,6 @@
 # UCP Bridge pour PrestaShop (module ucpbridge)
 
-> **Version bêta 0.1.2, prototype : ne pas utiliser en production.** Écrit pour le podcast Contrib. (épisode 15,
+> **Version bêta 0.1.3, prototype : ne pas utiliser en production.** Écrit pour le podcast Contrib. (épisode 15,
 > Google Universal Cart). Aucune garantie : paiement réel non éprouvé, pas de signatures HTTP, module non validé par
 > Google, Universal Cart pas encore ouvert en Europe. Relectures, tests et contributions bienvenus.
 
@@ -377,7 +377,7 @@ Compatibilité et code
 
 ## Installation
 
-Archive `ucpbridge-0.1.2-beta.zip` : back-office > Modules > Gestionnaire de modules > Téléverser un module. Ou :
+Archive `ucpbridge-0.1.3-beta.zip` : back-office > Modules > Gestionnaire de modules > Téléverser un module. Ou :
 
 ```sh
 cp -r ucpbridge /var/www/html/modules/ && chown -R www-data:www-data /var/www/html/modules/ucpbridge
@@ -479,7 +479,7 @@ avant le premier lancement. Version de PrestaShop du banc : variable `PS_IMAGE` 
 ```sh
 docker compose -p bench-ucp-bridge up -d
 ./run-tests.sh          # lint PHP, installation fraîche + jeu de démo, PHPUnit, pytest, bilan
-FROM_ZIP=1 ./run-tests.sh   # idem en installant depuis dist/ucpbridge-0.1.2-beta.zip
+FROM_ZIP=1 ./run-tests.sh   # idem en installant depuis dist/ucpbridge-0.1.3-beta.zip
 ./run-unit.sh           # tests unitaires seuls (PHPUnit dans le conteneur PrestaShop)
 cd tests && python3 -m pytest -q -k mcp    # une partie des tests d'intégration
 python3 mcp_client.py   # client MCP minimal : « t-shirt colibri taille M » jusqu'au continue_url
