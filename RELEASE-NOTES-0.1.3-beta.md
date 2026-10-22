@@ -137,7 +137,7 @@ module tiers qui appelle `UcpBridgeCart` n'a rien à changer.
 ### Traductions (#15)
 
 Nouveau système de traduction (`isUsingNewTranslationSystem()`), domaines `Modules.Ucpbridge.Admin`, `.Shop` et
-`.Api`, textes sources en anglais, catalogues XLIFF `translations/fr-FR/` et `translations/en-US/` (342 chaînes).
+`.Api`, textes sources en anglais, catalogues XLIFF `translations/fr-FR/` et `translations/en-US/` (346 chaînes).
 `tools/translations.py` tient les catalogues à jour (`--check` en contrôle). Les **codes UCP renvoyés aux agents ne
 changent pas** ; seuls les messages lisibles sont traduits. Codes stables ajoutés pour les scripts : `data-ucp-page`,
 `data-ucp-row`, `data-ucp-code`, code entre crochets en fin de ligne de `bin/purge.php` et `bin/reconcile.php`. Un
@@ -155,7 +155,7 @@ en-têtes de colonnes de l'export CSV.
 
 ### Banc d'essai et intégration continue (#16, #14)
 
-221 tests : 100 unitaires PHPUnit 12, 121 d'intégration pytest et Playwright. Banc docker paramétrable
+233 tests : 102 unitaires PHPUnit 12, 131 d'intégration pytest et Playwright. Banc docker paramétrable
 (`PS_IMAGE`, `UCP_PROJECT`, `UCP_PORT`, `MAILPIT_PORT`, `STRIPE_MOCK_PORT`, `UCP_WAIT`, `UNIT_PHP`), workflow GitHub
 Actions avec lint sous PHP 8.1, 8.3 et 8.5 et une intégration par version de PrestaShop. Le détail complet est dans
 `ucpbridge/CHANGELOG.md`.
