@@ -34,10 +34,10 @@ docker compose -p bench-ucp-bridge up -d
 Le workflow GitHub Actions [`.github/workflows/tests.yml`](.github/workflows/tests.yml) tourne sur chaque pull request
 et à chaque push sur `main` (lancement manuel possible depuis l'onglet Actions). Aucun secret n'est nécessaire.
 
-- **Lint PHP et unitaires** (PHP 8.3 et 8.5) : `php -l` sur tout le module, 61 tests PHPUnit sans base, puis
+- **Lint PHP et unitaires** (PHP 8.3 et 8.5) : `php -l` sur tout le module, tests PHPUnit sans base, puis
   `build-zip.sh` (refuse un tiret cadratin) ; l'archive installable est gardée en artefact.
 - **Intégration** : le banc `docker-compose.yml` démarre sur le runner, puis `run-tests.sh` déroule installation
-  fraîche, lint, unitaires et les 77 tests pytest et Playwright. En cas d'échec, l'artefact `journaux-integration`
+  fraîche, lint, unitaires et la suite pytest et Playwright. En cas d'échec, l'artefact `journaux-integration`
   contient `test-logs/` (installation, unitaires, intégration, rapport JUnit), les journaux docker, ceux de
   PrestaShop et les captures Playwright.
 - Mis en cache : images docker du banc, paquets pip, Chromium de Playwright, PHPUnit et cache npm.

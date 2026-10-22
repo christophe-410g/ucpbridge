@@ -47,10 +47,16 @@ jobs:
         run: ./tools/get-phpunit.sh
 
       - name: Lint PHP (php -l)
+        # Échec sur erreur de syntaxe ; les dépréciations (PHP 8.4 et plus) remontent en avertissements.
         run: |
-          find ucpbridge -name '*.php' -print0 | xargs -0 -n1 php -l > lint.log 2>&1 || true
-          if grep -v '^No syntax errors' lint.log; then echo "::error::erreurs de syntaxe PHP"; exit 1; fi
-          echo "$(wc -l < lint.log) fichiers PHP sans erreur de syntaxe"
+          set +e
+          find ucpbridge -name '*.php' -print0 | xargs -0 -n1 php -l > lint.log 2>&1
+          statut=$?
+          grep -E '^Deprecated' lint.log | sort -u | sed 's/^/::warning::/'
+          if [ "$statut" -ne 0 ]; then
+            grep -Ev '^No syntax errors|^$|Deprecated' lint.log; echo "::error::erreurs de syntaxe PHP"; exit 1
+          fi
+          echo "$(grep -c '^No syntax errors' lint.log) fichiers PHP sans erreur de syntaxe"
 
       - name: Tests unitaires (PHPUnit)
         working-directory: ucpbridge/tests
