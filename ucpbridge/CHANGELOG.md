@@ -2,6 +2,17 @@
 
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 
+## 0.1.3-beta (non publiée)
+
+Corrections
+
+- API (#5) : une clé API par plateforme en mode invité (`UcpBridgeApiKeys`, configuration `UCPBRIDGE_API_KEYS`).
+  L'identifiant de la plateforme entre dans l'identité de l'appelant (`platform:<id>`) : paniers, sessions de caisse,
+  commandes et clés d'idempotence sont cloisonnés entre plateformes. Configuration du module : ajout, régénération et
+  suppression des clés, sous jeton anti-CSRF. La clé unique `UCPBRIDGE_API_KEY` est migrée à la première lecture vers
+  la plateforme `default`, qui garde l'identité `platform` (sessions en cours conservées). Le commentaire qui
+  promettait ce cloisonnement sans le fournir est corrigé.
+
 ## 0.1.2-beta (2026-10-21) : première publication
 
 - Licence AFL-3.0 (Academic Free License 3.0). Titulaire des droits : Friends of Presta. Auteur : Christophe Vidal,

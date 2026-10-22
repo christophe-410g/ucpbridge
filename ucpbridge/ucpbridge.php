@@ -21,6 +21,7 @@ require_once __DIR__ . '/classes/UcpBridgeLegal.php';
 require_once __DIR__ . '/classes/UcpBridgeCatalog.php';
 require_once __DIR__ . '/classes/UcpBridgeCart.php';
 require_once __DIR__ . '/classes/UcpBridgeIdempotency.php';
+require_once __DIR__ . '/classes/UcpBridgeApiKeys.php';
 require_once __DIR__ . '/classes/UcpBridgeDiscount.php';
 require_once __DIR__ . '/classes/UcpBridgeOAuth.php';
 require_once __DIR__ . '/classes/UcpBridgeProof.php';
@@ -48,7 +49,7 @@ class Ucpbridge extends PaymentModule
         'refund_policy' => 'UCPBRIDGE_CMS_REFUND',
         'shipping_policy' => 'UCPBRIDGE_CMS_SHIPPING',
     ];
-    const CONFIG_KEYS = ['UCPBRIDGE_API_KEY', 'UCPBRIDGE_LINK_SECRET', 'UCPBRIDGE_MOCK_SECRET', 'UCPBRIDGE_STRIPE_KEY', 'UCPBRIDGE_STRIPE_PK',
+    const CONFIG_KEYS = ['UCPBRIDGE_API_KEY', 'UCPBRIDGE_API_KEYS', 'UCPBRIDGE_LINK_SECRET', 'UCPBRIDGE_MOCK_SECRET', 'UCPBRIDGE_STRIPE_KEY', 'UCPBRIDGE_STRIPE_PK',
         'UCPBRIDGE_STRIPE_API_BASE', 'UCPBRIDGE_GPAY_MERCHANT_ID', 'UCPBRIDGE_OAUTH_CLIENTS', 'UCPBRIDGE_TERMS_REVIEW',
         'UCPBRIDGE_CMS_TERMS', 'UCPBRIDGE_CMS_PRIVACY', 'UCPBRIDGE_CMS_REFUND', 'UCPBRIDGE_CMS_SHIPPING'];
     const HOOKS = ['moduleRoutes', 'actionHtaccessCreate', 'displayAdminOrderMain', 'actionEmailAddAfterContent',
@@ -138,9 +139,12 @@ class Ucpbridge extends PaymentModule
 
     private function installConfig()
     {
-        // Clé API remise à la plateforme (Bearer) et secret HMAC des liens signés : générés à l'installation.
+        // Clé API de la plateforme par défaut (Bearer) et secret HMAC des liens signés : générés à l'installation.
+        // Chaque plateforme supplémentaire reçoit sa propre clé (configuration du module).
         // Le paiement de test reste désactivé tant que UCPBRIDGE_MOCK_SECRET est vide.
-        $ok = Configuration::updateValue('UCPBRIDGE_API_KEY', 'ucpk_' . bin2hex(random_bytes(24)))
+        Configuration::deleteByName(UcpBridgeApiKeys::LEGACY);
+        $ok = Configuration::updateValue(UcpBridgeApiKeys::CONFIG, '{}')
+            && null !== UcpBridgeApiKeys::add(UcpBridgeApiKeys::DEFAULT_ID, UcpBridgeApiKeys::DEFAULT_LABEL)
             && Configuration::updateValue('UCPBRIDGE_LINK_SECRET', bin2hex(random_bytes(32)))
             && Configuration::updateValue('UCPBRIDGE_MOCK_SECRET', '')
             && Configuration::updateValue('UCPBRIDGE_STRIPE_KEY', '')
@@ -506,6 +510,56 @@ class Ucpbridge extends PaymentModule
 
     /* ---------- Page de configuration ---------- */
 
+    /** Plateformes et clés API (mode invité) : ajout, régénération, suppression. */
+    private function processApiKeys()
+    {
+        $actions = ['submitUcpbridgeApiKeyAdd', 'submitUcpbridgeApiKeyRegen', 'submitUcpbridgeApiKeyDelete'];
+        if (!array_filter($actions, [Tools::class, 'isSubmit'])) {
+            return '';
+        }
+        if (!hash_equals($this->configToken(), (string) Tools::getValue('ucp_csrf'))) {
+            return $this->displayError('Jeton de sécurité invalide : clés API inchangées.');
+        }
+        $id = (string) Tools::getValue('api_key_id');
+        if (Tools::isSubmit('submitUcpbridgeApiKeyDelete')) {
+            UcpBridgeApiKeys::remove($id);
+
+            return $this->displayConfirmation('Clé de la plateforme « ' . $id . ' » supprimée : elle est refusée dès maintenant.');
+        }
+        $key = Tools::isSubmit('submitUcpbridgeApiKeyAdd')
+            ? UcpBridgeApiKeys::add($id, (string) Tools::getValue('api_key_label'))
+            : UcpBridgeApiKeys::regenerate($id);
+        if (null === $key) {
+            return $this->displayError('Identifiant de plateforme invalide ou déjà utilisé (minuscules, chiffres, - et _, 32 caractères au plus).');
+        }
+
+        return $this->displayConfirmation('Clé de la plateforme « ' . $id . ' » : ' . $key . ' (à transmettre à cette plateforme seulement)');
+    }
+
+    private function apiKeysPanel(callable $esc)
+    {
+        $csrf = '<input type="hidden" name="ucp_csrf" value="' . $esc($this->configToken()) . '">';
+        $rows = '';
+        foreach (UcpBridgeApiKeys::all() as $id => $k) {
+            $rows .= '<tr><td><code>' . $esc($id) . '</code></td><td>' . $esc($k['label'] ?? '') . '</td><td><code>' . $esc($k['key'] ?? '')
+                . '</code></td><td>' . $esc($k['date_add'] ?? '') . '</td><td><form method="post" class="form-inline">' . $csrf
+                . '<input type="hidden" name="api_key_id" value="' . $esc($id) . '">'
+                . '<button class="btn btn-default" name="submitUcpbridgeApiKeyRegen" value="1">Régénérer</button> '
+                . '<button class="btn btn-default" name="submitUcpbridgeApiKeyDelete" value="1" '
+                . 'onclick="return confirm(\'Supprimer la clé de cette plateforme ?\')">Supprimer</button></form></td></tr>';
+        }
+
+        return '<h4>Plateformes (clés API, en-tête Authorization: Bearer)</h4>'
+            . '<p>Une clé par plateforme : chaque plateforme ne voit que ses propres paniers, sessions de caisse et commandes, '
+            . 'et ses clés d\'idempotence ne se mélangent pas à celles des autres. Ne jamais remettre la même clé à deux plateformes.</p>'
+            . ($rows ? '<table class="table"><thead><tr><th>Identifiant</th><th>Plateforme</th><th>Clé API</th><th>Créée le</th><th></th></tr></thead><tbody>'
+                . $rows . '</tbody></table>' : '<p>Aucune clé : le mode invité est fermé.</p>')
+            . '<form method="post" class="form-inline">' . $csrf
+            . '<input type="text" class="form-control" name="api_key_id" placeholder="identifiant (ex. google)" pattern="[a-z0-9][a-z0-9_-]{0,31}"> '
+            . '<input type="text" class="form-control" name="api_key_label" placeholder="nom affiché"> '
+            . '<button class="btn btn-default" name="submitUcpbridgeApiKeyAdd" value="1">Ajouter une plateforme</button></form>';
+    }
+
     /** Accès agents actifs (jetons OAuth non révoqués et non expirés), révocables par le marchand. */
     private function grantsPanel(callable $esc)
     {
@@ -572,6 +626,7 @@ class Ucpbridge extends PaymentModule
                 $out .= $this->displayConfirmation('Accès révoqué.');
             }
         }
+        $out .= $this->processApiKeys();
         if (Tools::isSubmit('submitUcpbridge')) {
             if (!hash_equals($this->configToken(), (string) Tools::getValue('ucp_csrf'))) {
                 $out .= $this->displayError('Jeton de sécurité invalide : configuration non enregistrée.');
@@ -593,9 +648,6 @@ class Ucpbridge extends PaymentModule
                     Configuration::updateValue($key, isset($pages[$id]) ? $id : 0);
                 }
                 Configuration::updateValue('UCPBRIDGE_TERMS_REVIEW', Tools::getValue('UCPBRIDGE_TERMS_REVIEW') ? 1 : 0);
-                if (Tools::getValue('regen_key')) {
-                    Configuration::updateValue('UCPBRIDGE_API_KEY', 'ucpk_' . bin2hex(random_bytes(24)));
-                }
                 $out .= $this->displayConfirmation('Configuration enregistrée.');
             }
         }
@@ -626,8 +678,6 @@ class Ucpbridge extends PaymentModule
             . 'MCP : <code>' . $esc($base) . 'ucp/v1/mcp</code></p>'
             . '<form method="post">'
             . '<input type="hidden" name="ucp_csrf" value="' . $esc($this->configToken()) . '">'
-            . '<p><label>Clé API (en-tête Authorization: Bearer)</label><br><code>' . $esc(Configuration::get('UCPBRIDGE_API_KEY')) . '</code>'
-            . ' <label><input type="checkbox" name="regen_key" value="1"> régénérer</label></p>'
             . '<h4>Liens légaux (links) et CGV</h4>' . $selects
             . '<p><label><input type="checkbox" name="UCPBRIDGE_TERMS_REVIEW" value="1"' . (Configuration::get('UCPBRIDGE_TERMS_REVIEW') ? ' checked' : '') . '> '
             . 'Relecture des CGV chez le marchand : une session sans acceptation passe en requires_buyer_review (page signée avec case à cocher)</label></p>'
@@ -643,7 +693,7 @@ class Ucpbridge extends PaymentModule
             . '<h4>Identity linking (OAuth 2.0)</h4><p>Clients enregistrés : <code>'
             . $esc(implode(', ', array_keys(UcpBridgeOAuth::clients())) ?: 'aucun') . '</code> (enregistrement par script, secret affiché une seule fois)</p>'
             . '<button class="btn btn-primary" name="submitUcpbridge" value="1">Enregistrer</button></form>'
-            . $this->grantsPanel($esc) . $this->reconcilePanel($esc) . '</div>';
+            . $this->apiKeysPanel($esc) . $this->grantsPanel($esc) . $this->reconcilePanel($esc) . '</div>';
 
         return $out;
     }

@@ -20,6 +20,9 @@ class UcpbridgeApiModuleFrontController extends ModuleFrontController
     /** @var array|null client authentifié par jeton OAuth : id_customer, client_id, scopes */
     private $user;
 
+    /** @var string|null plateforme authentifiée par sa clé API (mode invité) */
+    private $platform;
+
     /** @var string en-tête UCP-Agent (ou meta.ucp-agent en MCP) */
     private $agent = '';
 
@@ -148,12 +151,12 @@ class UcpbridgeApiModuleFrontController extends ModuleFrontController
         // Authentification. Deux jetons distincts, un seul en-tête Authorization: Bearer (RFC 6750, comme la spécification) :
         //  - jeton client OAuth (préfixe ucpat_) : identifie le client PrestaShop ET la plateforme (client OAuth
         //    qui l'a obtenu). Prioritaire. La clé API peut l'accompagner en X-UCP-Api-Key ; si présente, elle est vérifiée.
-        //  - sinon clé API de la plateforme (préfixe ucpk_) : caisse en invité.
+        //  - sinon clé API de la plateforme (préfixe ucpk_, une clé par plateforme) : caisse en invité.
         $auth = $this->header('Authorization');
-        $key = (string) Configuration::get('UCPBRIDGE_API_KEY');
         $bearer = preg_match('/^Bearer\s+(\S+)$/i', $auth, $m) ? $m[1] : '';
         $realm = rtrim($this->context->link->getBaseLink(), '/');
         $this->user = null;
+        $this->platform = null;
         if (0 === strpos($bearer, UcpBridgeOAuth::ACCESS_PREFIX)) {
             $this->user = UcpBridgeOAuth::verifyAccess($bearer);
             if (!$this->user) {
@@ -161,10 +164,10 @@ class UcpbridgeApiModuleFrontController extends ModuleFrontController
                     ['WWW-Authenticate' => 'Bearer realm="' . $realm . '", error="invalid_token"']);
             }
             $extra = $this->header('X-UCP-Api-Key');
-            if ('' !== $extra && !hash_equals($key, $extra)) {
+            if ('' !== $extra && null === UcpBridgeApiKeys::authenticate($extra)) {
                 $this->send(401, ['code' => 'unauthorized', 'content' => 'X-UCP-Api-Key invalide'], ['WWW-Authenticate' => 'Bearer realm="ucp"']);
             }
-        } elseif ('' === $key || '' === $bearer || !hash_equals($key, $bearer)) {
+        } elseif (null === ($this->platform = UcpBridgeApiKeys::authenticate($bearer))) {
             $this->send(401, ['code' => 'unauthorized', 'content' => 'Clé API absente ou invalide (Authorization: Bearer)'],
                 ['WWW-Authenticate' => 'Bearer realm="ucp"']);
         }
@@ -227,7 +230,8 @@ class UcpbridgeApiModuleFrontController extends ModuleFrontController
             return [400, ['code' => 'invalid_idempotency_key', 'content' => 'Idempotency-Key trop longue'], []];
         }
         $hash = UcpBridgeIdempotency::fingerprint($method, $path, $body);
-        // Clé cloisonnée par appelant : deux plateformes (ou un invité et un client) ne partagent jamais une réponse.
+        // Clé cloisonnée par appelant : deux plateformes (chacune sa clé API, ou chacune son client OAuth) ou un invité et
+        // un client ne partagent jamais une réponse.
         $key = UcpBridgeIdempotency::scopedKey($this->callerId(), $idem);
         $cached = UcpBridgeIdempotency::begin($key, $hash);
         if (null !== $cached) {
@@ -289,10 +293,14 @@ class UcpbridgeApiModuleFrontController extends ModuleFrontController
             && strtolower($o['host']) === strtolower($b['host']) && $port($o) === $port($b);
     }
 
-    /** Identité de l'appelant pour cloisonner l'idempotence : client OAuth + client final, ou plateforme invitée. */
+    /**
+     * Identité de l'appelant (propriétaire des paniers et sessions, espace des clés d'idempotence) : client OAuth +
+     * client final, ou plateforme invitée identifiée par sa propre clé API.
+     */
     private function callerId()
     {
-        return $this->user ? 'user:' . $this->user['client_id'] . ':' . (int) $this->user['id_customer'] : 'platform';
+        return $this->user ? 'user:' . $this->user['client_id'] . ':' . (int) $this->user['id_customer']
+            : UcpBridgeApiKeys::callerId((string) $this->platform);
     }
 
     private function route($method, $path, array $body)

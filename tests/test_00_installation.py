@@ -4,7 +4,7 @@ Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast
 """
 import subprocess
 
-from conftest import BASE, PS, appel, config, sql, sql_val
+from conftest import BASE, PS, appel, cle_api, config, sql, sql_val
 
 TABLES = ["ucpbridge_session", "ucpbridge_idempotency", "ucpbridge_oauth_code", "ucpbridge_oauth_token",
           "ucpbridge_proof", "ucpbridge_withdrawal", "ucpbridge_payment", "ucpbridge_oauth_revocation"]
@@ -42,7 +42,8 @@ def test_desinstallation_puis_reinstallation():
     assert sorted(hooks) == sorted(HOOKS)
     assert hook_ext == "1" and htaccess == "1"
     # Secrets générés à l'installation, jamais livrés avec le module.
-    assert config("UCPBRIDGE_API_KEY").startswith("ucpk_") and len(config("UCPBRIDGE_LINK_SECRET")) == 64
+    assert cle_api().startswith("ucpk_") and len(config("UCPBRIDGE_LINK_SECRET")) == 64
+    assert config("UCPBRIDGE_API_KEY") == ""  # clé unique des versions précédentes : plus utilisée
     vide = ("", "NULL")
     assert config("UCPBRIDGE_MOCK_SECRET") in vide and config("UCPBRIDGE_STRIPE_KEY") in vide
     assert config("UCPBRIDGE_OAUTH_CLIENTS") == "{}"
