@@ -178,6 +178,12 @@ class UcpBridgeOAuth
         if (!$row) {
             return ['invalid_grant', 'Code inconnu'];
         }
+        // Client vérifié AVANT toute consommation : un autre client enregistré qui détient le code (fuite par un journal,
+        // un en-tête Referer...) ne peut ni le brûler ni déclencher la révocation des jetons de son propriétaire.
+        // Même réponse qu'un code inconnu : rien n'indique à ce client que le code existe.
+        if (!hash_equals((string) $row['client_id'], (string) $client['client_id'])) {
+            return ['invalid_grant', 'Code inconnu'];
+        }
         // Consommation atomique : un code rejoué ne passe jamais deux fois.
         Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'ucpbridge_oauth_code` SET used = 1 WHERE code_hash = \'' . pSQL($hash) . '\' AND used = 0');
         if (1 !== (int) Db::getInstance()->Affected_Rows()) {
@@ -189,8 +195,8 @@ class UcpBridgeOAuth
         if (strtotime($row['expires_at']) < time()) {
             return ['invalid_grant', 'Code expiré'];
         }
-        if ($row['client_id'] !== $client['client_id'] || $row['redirect_uri'] !== (string) $redirectUri) {
-            return ['invalid_grant', 'Client ou redirect_uri différent de la demande d\'autorisation'];
+        if ($row['redirect_uri'] !== (string) $redirectUri) {
+            return ['invalid_grant', 'redirect_uri différent de la demande d\'autorisation'];
         }
         if (!UcpBridgePkce::isValidVerifier($verifier)) {
             return ['invalid_grant', 'code_verifier absent ou mal formé (PKCE obligatoire)'];

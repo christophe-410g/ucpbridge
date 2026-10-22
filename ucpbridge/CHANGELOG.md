@@ -2,6 +2,14 @@
 
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 
+## 0.1.3-beta (non publiée)
+
+Corrections
+
+- OAuth (#4) : `redeemCode()` vérifie que le client authentifié est le propriétaire du code AVANT de le marquer
+  utilisé. Un autre client enregistré qui détient le code reçoit `invalid_grant` (« Code inconnu »), sans brûler le
+  code ni déclencher la révocation des jetons de son propriétaire ; le rejeu par le propriétaire révoque toujours.
+
 ## 0.1.2-beta (2026-10-21) : première publication
 
 - Licence AFL-3.0 (Academic Free License 3.0). Titulaire des droits : Friends of Presta. Auteur : Christophe Vidal,
