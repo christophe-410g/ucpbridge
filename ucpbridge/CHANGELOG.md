@@ -15,7 +15,9 @@ Nouveautés
   changent aucune table : elles n'ajoutent que des clés au JSON `payload` des sessions
   (`charge_attempt`, `charge_unknown`), lues avec une valeur par défaut. Configuration : la clé unique
   `UCPBRIDGE_API_KEY` (#5) est migrée vers la plateforme `default` de `UCPBRIDGE_API_KEYS` en tête de la mise à jour,
-  avant la création des clés manquantes (sinon une clé neuve aurait pris sa place). Version du module : 0.1.3.
+  avant la création des clés manquantes (sinon une clé neuve aurait pris sa place). L'ancienne clé n'est supprimée
+  qu'après l'enregistrement réussi de la nouvelle liste (`UcpBridgeApiKeys::migrateLegacy()`) : si l'écriture échoue,
+  elle reste acceptée et la mise à jour échoue au lieu de couper la plateforme en place. Version du module : 0.1.3.
 - Désinstallation (#12) : le journal de preuve (`ps_ucpbridge_proof`), les demandes de rétractation
   (`ps_ucpbridge_withdrawal`) et le journal des paiements (`ps_ucpbridge_payment`) sont conservés par défaut et
   retrouvés à la réinstallation (colonnes complétées si les tables datent d'une version plus ancienne). Suppression
@@ -30,7 +32,12 @@ Nouveautés
   expirés supprimés avec leur panier PrestaShop sans commande et leur adresse sans client ; sessions terminées par une
   commande gardées sans les données personnelles de l'acheteur ; clients invités créés par le module et sans aucune
   commande supprimés, ceux qui ont commandé jamais ; codes et jetons OAuth expirés ou révoqués ; journal des paiements,
-  preuves et rétractations après 10 ans ; clés d'idempotence de plus de 24 h. Aucune commande touchée. Nouvelle table
+  preuves et rétractations après 10 ans ; clés d'idempotence de plus de 24 h. Aucune commande touchée. Une session en
+  échec (débit non remboursé ou incertain) et son acheteur invité suivent la durée du journal des paiements : jamais
+  supprimés avant. Durées du journal des paiements et des preuves jamais sous 3650 jours (0 = jamais reste permis) :
+  refus à l'enregistrement, et purge refusée sans rien supprimer si la configuration est en dessous. Compte rendu
+  exact (paniers et adresses supprimés avec un invité comptés, simulation identique à la purge) ; sessions lues par
+  lots, celles déjà minimisées écartées en SQL ; aucune commande vérifiée avant toute suppression. Nouvelle table
   `ps_ucpbridge_customer` (invités créés par le module, renseignée à la création de l'invité, reprise depuis les
   sessions à la mise à jour depuis la 0.1.2, conservée à la désinstallation avec les preuves).
 - Back-office aux standards PrestaShop (#17) : la page de configuration (`UcpBridgeConfigPage`) est faite de

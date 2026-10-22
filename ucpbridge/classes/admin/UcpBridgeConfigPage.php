@@ -126,11 +126,15 @@ class UcpBridgeConfigPage
         }
         if (Tools::isSubmit('submitUcpbridgeRetention')) {
             $values = [];
-            foreach (UcpBridgeRetention::CATEGORIES as $c) {
+            foreach (UcpBridgeRetention::CATEGORIES as $cat => $c) {
                 $v = UcpBridgeRetention::normalizeDays(Tools::getValue($c[0]));
                 if (null === $v) {
                     return $this->module->displayError('Durée de conservation invalide (' . $c[2] . ') : un nombre entier de jours, de 0 à '
                         . UcpBridgeRetention::MAX_DAYS . '. Aucune durée modifiée.');
+                }
+                if (UcpBridgeRetention::tooShort($cat, $v)) {
+                    // Durée légale (paiements, preuves) : jamais sous le plancher, une faute de frappe effacerait des pièces.
+                    return $this->module->displayError(UcpBridgeRetention::tooShortMessage($cat));
                 }
                 $values[$c[0]] = $v;
             }
@@ -139,6 +143,9 @@ class UcpBridgeConfigPage
             }
 
             return $this->module->displayConfirmation('Durées de conservation enregistrées.');
+        }
+        if ($bad = UcpBridgePurge::refusedDurations()) {
+            return $this->module->displayError(UcpBridgeRetention::purgeRefusedMessage($bad));
         }
         $dry = Tools::isSubmit('submitUcpbridgePurgeDry');
         $lines = [];
@@ -359,7 +366,8 @@ class UcpBridgeConfigPage
         $days = UcpBridgePurge::durations();
         foreach (UcpBridgeRetention::CATEGORIES as $cat => $c) {
             $inputs[] = ['type' => 'text', 'name' => $c[0], 'label' => $c[2], 'class' => 'fixed-width-sm', 'suffix' => 'jours',
-                'desc' => 'Défaut ' . (int) $c[1] . ', 0 = jamais purgé, ' . UcpBridgeRetention::MAX_DAYS . ' au plus.'];
+                'desc' => 'Défaut ' . (int) $c[1] . (isset(UcpBridgeRetention::LEGAL_MIN_DAYS[$cat])
+                    ? ', minimum légal ' . (int) UcpBridgeRetention::LEGAL_MIN_DAYS[$cat] : '') . ', 0 = jamais purgé, ' . UcpBridgeRetention::MAX_DAYS . ' au plus.'];
             $values[$c[0]] = (int) $days[$cat];
         }
 
