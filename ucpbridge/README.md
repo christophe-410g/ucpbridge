@@ -54,18 +54,22 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   (`order_payment.transaction_id`). Interface `UcpBridgePaymentProvider` :
   `getName()`, `handlers()` (déclarations UCP), `supports($handlerName, $handlerId)`,
   `charge($credential, $amount, $currency, $context)` qui renvoie un `UcpBridgePaymentResult`
-  (`succeeded` + référence, `failed` + message, ou `requires_action` + URL : la session passe alors en
-  `requires_escalation` avec `continue_url`, prévu pour 3-D Secure), et `refund($transactionId, $amount, $currency,
+  (`succeeded` + référence, `failed` + message, `requires_action` + URL : la session passe alors en
+  `requires_escalation` avec `continue_url`, prévu pour 3-D Secure, ou `unknown` + message quand le prestataire a pu
+  débiter sans réponse exploitable : délai dépassé, connexion coupée, erreur 5xx), et `refund($transactionId, $amount, $currency,
   $context)`, appelée automatiquement si la commande ne peut pas être créée après un débit réussi.
   Chaque débit et chaque remboursement est consigné dans `ps_ucpbridge_payment` (session, adaptateur, opération,
-  statut, référence, montant).
+  statut, référence, montant). Une écriture impossible dans ce journal n'interrompt jamais la caisse (le débit est
+  mémorisé avant) : elle est signalée au journal PrestaShop (gravité 3) avec la référence de l'opération.
   - `fr.410gone.ucpbridge.mock` : paiement de test, actif seulement si un secret de simulation est configuré
     (référence `mock_...` propre à chaque débit, remboursement simulé).
   - `com.google.pay` version `2026-01-23` (adaptateur Stripe) : `environment: TEST`, `merchant_info`
     (`merchant_id` de test configurable), `allowed_payment_methods` CARD, `tokenization_specification`
     `PAYMENT_GATEWAY` gateway `stripe` (`stripe:version`, `stripe:publishableKey`). L'agent renvoie
     `credential: {type: PAYMENT_GATEWAY, token: "<jeton Stripe sérialisé en JSON par Google Pay>"}` ; l'adaptateur en
-    extrait l'id `tok_...` et débite par l'API Charges (`source`), `Idempotency-Key` transmise à Stripe, montant
+    extrait l'id `tok_...` et débite par l'API Charges (`source`), `Idempotency-Key` transmise à Stripe (session,
+    numéro de tentative, empreinte de l'instrument, du montant et de la devise : un panier modifié ou un nouvel essai
+    après un refus part avec une nouvelle clé), montant
     vérifié au retour ; remboursement par l'API Refunds. URL de base `https://api.stripe.com` par défaut, modifiable
     par script uniquement (banc d'essai), pas depuis le back-office. **Clés live refusées** : le gestionnaire n'est
     annoncé qu'avec une clé `sk_test_`.
@@ -73,7 +77,8 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   - `GET /.well-known/oauth-authorization-server` (RFC 8414), `/ucp/oauth/authorize`, `/ucp/oauth/token`,
     `/ucp/oauth/revoke` (RFC 7009).
   - Code d'autorisation, **PKCE S256 obligatoire**, `redirect_uri` en correspondance exacte, `state` renvoyé, code à
-    usage unique 5 min (un code rejoué révoque les jetons déjà émis), scopes `dev.ucp.shopping.checkout:manage` et
+    usage unique 5 min (un code rejoué par son client révoque les jetons déjà émis ; présenté par un autre client, il
+    est refusé sans être consommé ni rien révoquer), scopes `dev.ucp.shopping.checkout:manage` et
     `dev.ucp.shopping.order:read` présentés en un seul consentement.
   - Clients enregistrés en configuration (`UCPBRIDGE_OAUTH_CLIENTS`, secret stocké haché SHA-256) ; authentification
     `client_secret_basic` (et `client_secret_post`). `private_key_jwt`, recommandé par Google, n'est pas implémenté.
@@ -132,6 +137,12 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   les hooks des modules tiers et les e-mails, une exception à ce stade laisse une commande valide. Dans ce cas, rien
   n'est remboursé, la session est terminée (`completed`) avec cette commande et l'exception est journalisée en
   avertissement (« commande conservée, aucun remboursement »).
+- **Débit au résultat inconnu** : `failed` signifie « aucun débit » (refus du prestataire, requête jamais partie :
+  connexion refusée, nom d'hôte introuvable). Un résultat `unknown` (délai dépassé, connexion coupée après l'envoi,
+  erreur 5xx sans charge, exception levée par l'adaptateur pendant le débit) n'est jamais traité comme un refus : la
+  session reste `complete_in_progress` avec la trace du débit engagé, l'agent reçoit le message
+  `payment_verification` (ne pas relancer avec un autre moyen de paiement), un nouvel essai ne redébite pas, et le
+  rapprochement la classe en « débit incertain, à vérifier chez le prestataire ».
 - **Rapprochement des sessions bloquées** : si le processus PHP meurt pendant la finalisation (erreur fatale,
   `max_execution_time`, processus tué), la session reste `complete_in_progress`. La commande de rapprochement la
   traite dès qu'elle est réservée depuis plus de N minutes (15 par défaut) : commande trouvée sur le panier = session
