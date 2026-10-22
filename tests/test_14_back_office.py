@@ -13,9 +13,13 @@ from conftest import BASE, CLIENT_ID, admin_dir, admin_login, cle_api, config, s
 from test_04_relecture import id_client_demo, jeton_direct
 
 def ouvrir_config(page):
+    """Lien sans jeton d'administration : PrestaShop demande confirmation, sur une page à part en 9 (URL
+    « compromised »), dans la page elle-même en 8. Le lien de confirmation est cherché dans les deux cas."""
     page.goto(f"{BASE}/{admin_dir()}/index.php?controller=AdminModules&configure=ucpbridge")
-    if "compromised" in page.url:  # lien sans jeton d'administration : PrestaShop demande confirmation
-        page.locator("a, button").filter(has_text=re.compile("risques|risks", re.I)).first.click()
+    risques = page.locator("a, button").filter(has_text=re.compile("comprends les risques|understand the risks", re.I))
+    if risques.count():
+        with page.expect_navigation(wait_until="load"):
+            risques.first.click()
     page.wait_for_selector("input[name=ucp_csrf]", state="attached")
 
 
