@@ -8,10 +8,17 @@
  * - une session terminée par une commande n'est jamais supprimée : seules les données personnelles de son JSON sont
  *   retirées (l'agent relit toujours la commande) ;
  * - une session en cours de finalisation ou de rapprochement (complete_in_progress, updating, reconciling) n'est
- *   jamais touchée ; une session « failed » (incident de paiement) suit la durée du journal des paiements ;
+ *   jamais touchée ; une session « failed » (incident de paiement : débit non remboursé, débit incertain) suit la durée
+ *   du journal des paiements et n'est supprimée par rien d'autre ;
  * - seuls les clients invités enregistrés comme créés par le module (ps_ucpbridge_customer) et sans AUCUNE commande
  *   sont supprimés (Customer::delete : adresses inutilisées, paniers sans commande) ; un invité qui a commandé, ou
- *   devenu client avec compte, ne l'est jamais ;
+ *   devenu client avec compte, ne l'est jamais, pas plus qu'un invité qui a une session « failed » (l'acheteur à
+ *   rembourser reste joignable aussi longtemps que le journal des paiements) ;
+ * - durées légales (journal des paiements, preuves et rétractations) jamais sous leur plancher
+ *   (UcpBridgeRetention::LEGAL_MIN_DAYS) : sinon la purge refuse de tourner ;
+ * - le compte rendu compte tout ce qui part, y compris les paniers et adresses supprimés avec un invité, et la
+ *   simulation donne les mêmes nombres que la purge ;
+ * - les sessions sont lues par lots (BATCH), sans relire celles déjà minimisées.
  * - les paniers PrestaShop supprimés sont ceux d'une session purgée, sans commande, d'un visiteur sans compte (sans
  *   client ou invité créé par le module) : le panier abandonné d'un client avec compte reste à la boutique.
  *
@@ -23,17 +30,31 @@ if (!defined('_PS_VERSION_')) {
 
 class UcpBridgePurge
 {
+    /** Sessions lues par lot. */
+    const BATCH = 500;
+
     /** @var bool simulation : compter sans rien supprimer */
     private $dryRun;
     /** @var int */
     private $now;
+    /** @var int */
+    private $batch;
     /** @var array */
     private $counts;
+    /** @var array sessions et paniers déjà comptés (simulation : une session n'est comptée qu'une fois) */
+    private $seen;
 
-    public function __construct($dryRun = false, $now = null)
+    public function __construct($dryRun = false, $now = null, $batch = self::BATCH)
     {
         $this->dryRun = (bool) $dryRun;
         $this->now = null === $now ? time() : (int) $now;
+        $this->batch = max(1, (int) $batch);
+    }
+
+    /** Durées sous leur plancher légal dans la configuration : catégorie => durée (vide si tout est conforme). */
+    public static function refusedDurations()
+    {
+        return UcpBridgeRetention::tooShortAll(self::durations());
     }
 
     /** Durées configurées par catégorie (jours, 0 = jamais). */
@@ -78,8 +99,13 @@ class UcpBridgePurge
     /** @return array compte par ligne du compte rendu (clés de UcpBridgeRetention::REPORT) */
     public function run()
     {
-        $this->counts = array_fill_keys(UcpBridgeRetention::REPORT, 0);
         $d = self::durations();
+        if ($bad = UcpBridgeRetention::tooShortAll($d)) {
+            // Durée légale trop courte (écrite hors du back-office) : rien n'est supprimé.
+            throw new RuntimeException(UcpBridgeRetention::purgeRefusedMessage($bad));
+        }
+        $this->counts = array_fill_keys(UcpBridgeRetention::REPORT, 0);
+        $this->seen = ['sessions' => [], 'carts' => []];
         $cut = function ($cat) use ($d) {
             return UcpBridgeRetention::cutoff($d[$cat], $this->now);
         };
@@ -130,23 +156,43 @@ class UcpBridgePurge
      */
     private function purgeSessions($cutoff, $failed = false)
     {
+        $after = '';
+        do {
+            $rows = $this->sessionBatch($cutoff, $failed, $after, $this->batch);
+            foreach ($rows as $r) {
+                $after = (string) $r['id_session'];
+                $payload = json_decode((string) $r['payload'], true) ?: [];
+                if ('completed' === $r['status'] || (int) $r['id_order'] > 0) {
+                    if (empty($payload['minimized_at'])) {
+                        $this->minimize($r['id_session'], $payload);
+                    }
+                    continue;
+                }
+                $this->deleteSession($r['id_session'], (int) $r['id_cart'], $payload);
+            }
+        } while (count($rows) >= $this->batch);
+    }
+
+    /**
+     * Lot de sessions à traiter, par identifiant croissant après $after (pagination stable, en simulation aussi).
+     * Les sessions déjà minimisées sont écartées en SQL : elles ne sont plus relues à chaque purge.
+     */
+    public function sessionBatch($cutoff, $failed, $after, $limit)
+    {
         $p = _DB_PREFIX_;
         $c = pSQL($cutoff);
         $busy = "'" . implode("','", UcpBridgeCart::BUSY) . "'";
         $where = $failed
             ? "status = 'failed' AND date_upd < '{$c}'"
             : "status NOT IN ({$busy}, 'failed') AND date_upd < '{$c}' AND (status IN ('completed', 'canceled', 'handed_off') OR expires_at < '{$c}')";
-        $rows = Db::getInstance()->executeS("SELECT id_session, status, id_cart, id_order, payload FROM `{$p}ucpbridge_session` WHERE {$where}", true, false) ?: [];
-        foreach ($rows as $r) {
-            $payload = json_decode((string) $r['payload'], true) ?: [];
-            if ('completed' === $r['status'] || (int) $r['id_order'] > 0) {
-                if (empty($payload['minimized_at'])) {
-                    $this->minimize($r['id_session'], $payload);
-                }
-                continue;
-            }
-            $this->deleteSession($r['id_session'], (int) $r['id_cart'], $payload);
+        // Clé JSON exacte (guillemets non échappés : une valeur saisie par l'acheteur ne peut pas l'imiter).
+        $where .= ' AND payload NOT LIKE \'%"minimized\\_at":%\'';
+        if ('' !== (string) $after) {
+            $where .= " AND id_session > '" . pSQL($after) . "'";
         }
+
+        return Db::getInstance()->executeS("SELECT id_session, status, id_cart, id_order, payload FROM `{$p}ucpbridge_session`
+            WHERE {$where} ORDER BY id_session LIMIT " . max(1, (int) $limit), true, false) ?: [];
     }
 
     private function minimize($idSession, array $payload)
@@ -165,12 +211,14 @@ class UcpBridgePurge
     {
         $p = _DB_PREFIX_;
         ++$this->counts['sessions_deleted'];
+        $this->seen['sessions'][(string) $idSession] = true;
         if ($idCart && !Order::getIdByCartId($idCart)) {
             $owner = (int) Db::getInstance()->getValue("SELECT id_customer FROM `{$p}cart` WHERE id_cart = {$idCart}", false);
             $guest = $owner && Db::getInstance()->getValue("SELECT 1 FROM `{$p}ucpbridge_customer` m JOIN `{$p}customer` cu USING (id_customer)
                 WHERE m.id_customer = {$owner} AND cu.is_guest = 1", false);
             if (Db::getInstance()->getValue("SELECT 1 FROM `{$p}cart` WHERE id_cart = {$idCart}", false) && (!$owner || $guest)) {
                 ++$this->counts['carts'];
+                $this->seen['carts'][$idCart] = true;
                 if (!$this->dryRun) {
                     (new Cart($idCart))->delete();
                 }
@@ -188,7 +236,11 @@ class UcpBridgePurge
         }
     }
 
-    /** Clients invités créés par le module avant la date limite, sans aucune commande ni session en cours. */
+    /**
+     * Clients invités créés par le module avant la date limite, sans aucune commande, sans session en cours et sans
+     * session « failed » (incident de paiement : l'acheteur est peut-être à rembourser ; il redevient éligible quand la
+     * session part avec le journal des paiements).
+     */
     private function purgeGuests($cutoff)
     {
         $p = _DB_PREFIX_;
@@ -204,27 +256,42 @@ class UcpBridgePurge
             WHERE m.date_add < '{$c}'
             AND NOT EXISTS (SELECT 1 FROM `{$p}orders` o WHERE o.id_customer = m.id_customer)
             AND NOT EXISTS (SELECT 1 FROM `{$p}ucpbridge_session` s JOIN `{$p}cart` ca ON ca.id_cart = s.id_cart
-                WHERE ca.id_customer = m.id_customer AND (s.status IN ({$busy}) OR (s.status NOT IN ('completed', 'canceled', 'handed_off', 'failed')
+                WHERE ca.id_customer = m.id_customer AND (s.status IN ({$busy}, 'failed') OR (s.status NOT IN ('completed', 'canceled', 'handed_off')
                 AND s.expires_at > '{$now}')))", true, false) ?: [];
         foreach ($ids as $row) {
             $id = (int) $row['id_customer'];
-            // Sessions restantes de ce client (toutes sans commande, terminées ou expirées) : supprimées avec lui.
+            $customer = new Customer($id);
+            // Vérification AVANT toute suppression : jamais un client qui a commandé, ni devenu client avec compte.
+            if (!Validate::isLoadedObject($customer) || !$customer->is_guest
+                || Db::getInstance()->getValue("SELECT 1 FROM `{$p}orders` WHERE id_customer = {$id}", false)) {
+                continue;
+            }
+            // Sessions restantes de ce client (sans commande, terminées ou expirées), jamais une session « failed ».
             $sessions = Db::getInstance()->executeS("SELECT s.id_session FROM `{$p}ucpbridge_session` s JOIN `{$p}cart` ca ON ca.id_cart = s.id_cart
-                WHERE ca.id_customer = {$id}", true, false) ?: [];
-            $this->counts['sessions_deleted'] += count($sessions);
+                WHERE ca.id_customer = {$id} AND s.status NOT IN ({$busy}, 'failed')", true, false) ?: [];
+            // Paniers et adresses que Customer::delete() supprime avec lui (comptés aussi en simulation).
+            $carts = Db::getInstance()->executeS("SELECT ca.id_cart FROM `{$p}cart` ca WHERE ca.id_customer = {$id}
+                AND NOT EXISTS (SELECT 1 FROM `{$p}orders` o WHERE o.id_cart = ca.id_cart)", true, false) ?: [];
+            $addresses = (int) Db::getInstance()->getValue("SELECT COUNT(*) FROM `{$p}address` WHERE id_customer = {$id} AND deleted = 0", false);
+            foreach ($sessions as $s) {
+                if (!isset($this->seen['sessions'][(string) $s['id_session']])) {
+                    ++$this->counts['sessions_deleted'];
+                }
+            }
+            foreach ($carts as $ca) {
+                if (!isset($this->seen['carts'][(int) $ca['id_cart']])) {
+                    ++$this->counts['carts'];
+                }
+            }
+            $this->counts['addresses'] += $addresses;
             ++$this->counts['guests'];
             if ($this->dryRun) {
                 continue;
             }
             foreach ($sessions as $s) {
-                Db::getInstance()->delete('ucpbridge_session', 'id_session = \'' . pSQL($s['id_session']) . '\'');
+                Db::getInstance()->delete('ucpbridge_session', 'id_session = \'' . pSQL($s['id_session']) . '\' AND status NOT IN (' . $busy . ', \'failed\')');
             }
-            $customer = new Customer($id);
-            // Dernière vérification juste avant la suppression : jamais un client qui a commandé.
-            if (Validate::isLoadedObject($customer) && $customer->is_guest
-                && !Db::getInstance()->getValue("SELECT 1 FROM `{$p}orders` WHERE id_customer = {$id}", false)) {
-                $customer->delete();
-            }
+            $customer->delete();
             Db::getInstance()->delete('ucpbridge_customer', 'id_customer = ' . $id);
         }
     }

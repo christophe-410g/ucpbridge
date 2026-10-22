@@ -12,6 +12,7 @@
  * - journal des paiements : 3650 jours (10 ans, pièces comptables, article L123-22 du Code de commerce) ;
  * - journal de preuve et rétractations : 3650 jours (10 ans, conservation des contrats conclus par voie électronique à
  *   partir de 120 euros, articles L213-1 et D213-2 du Code de la consommation).
+ * Ces deux dernières durées ne peuvent pas descendre sous 3650 jours (LEGAL_MIN_DAYS) ; 0 (jamais) reste permis.
  *
  * Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
  */
@@ -32,6 +33,13 @@ class UcpBridgeRetention
         'payments' => ['UCPBRIDGE_RETENTION_PAYMENTS', 3650],
         'proofs' => ['UCPBRIDGE_RETENTION_PROOFS', 3650],
     ];
+
+    /**
+     * Durées légales : plancher par catégorie (jours). Une durée plus courte est refusée à l'enregistrement et bloque la
+     * purge ; 0 (jamais purgé) reste permis. 10 ans : pièces comptables (article L123-22 du Code de commerce) et
+     * contrats conclus par voie électronique (articles L213-1 et D213-2 du Code de la consommation).
+     */
+    const LEGAL_MIN_DAYS = ['payments' => 3650, 'proofs' => 3650];
 
     /** Données personnelles d'une session, retirées d'une session terminée par une commande. */
     const PERSONAL_KEYS = ['buyer', 'consent', 'destination', 'terms_acceptance', 'context'];
@@ -100,6 +108,46 @@ class UcpBridgeRetention
         }
 
         return (int) $v;
+    }
+
+    /** Durée trop courte pour une catégorie à durée légale (0 = jamais purgé : toujours permis). */
+    public static function tooShort($cat, $days)
+    {
+        $days = (int) $days;
+
+        return $days > 0 && isset(self::LEGAL_MIN_DAYS[$cat]) && $days < self::LEGAL_MIN_DAYS[$cat];
+    }
+
+    /** Catégories dont la durée est sous le plancher légal : catégorie => durée. */
+    public static function tooShortAll(array $durations)
+    {
+        $bad = [];
+        foreach ($durations as $cat => $days) {
+            if (self::tooShort($cat, $days)) {
+                $bad[$cat] = (int) $days;
+            }
+        }
+
+        return $bad;
+    }
+
+    /** Message de refus d'une durée trop courte, à l'enregistrement. */
+    public static function tooShortMessage($cat)
+    {
+        return 'Durée de conservation trop courte (' . self::CATEGORIES[$cat][2] . ') : la loi impose de conserver ces pièces '
+            . '10 ans. Saisissez au moins ' . self::LEGAL_MIN_DAYS[$cat] . ' jours, ou 0 pour ne jamais purger. Aucune durée modifiée.';
+    }
+
+    /** Message de refus de la purge (durées trop courtes en configuration), en ligne de commande et au back-office. */
+    public static function purgeRefusedMessage(array $bad)
+    {
+        $list = [];
+        foreach ($bad as $cat => $days) {
+            $list[] = self::CATEGORIES[$cat][2] . ' : ' . (int) $days . ' jours, minimum légal ' . self::LEGAL_MIN_DAYS[$cat] . ' jours';
+        }
+
+        return 'Purge refusée, rien n\'a été supprimé : durée de conservation trop courte (' . implode(' ; ', $list) . ', ou 0 pour '
+            . 'ne jamais purger). Corrigez les durées dans la configuration du module.';
     }
 
     /** Date limite (Y-m-d H:i:s) : ce qui est plus ancien est purgé. null si la durée vaut 0 (jamais purgé). */
