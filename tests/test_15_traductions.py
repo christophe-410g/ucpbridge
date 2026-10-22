@@ -125,7 +125,7 @@ def test_fiche_commande_et_pages_en_anglais(boutique, langue):
         nav.close()
     accuses = attendre_mails(b["email"], n=len(msgs) + 1)
     accuse = [m for m in accuses if m["ID"] not in {x["ID"] for x in msgs}][0]
-    assert accuse["Subject"] == "Acknowledgement of your withdrawal request"
+    assert accuse["Subject"].endswith("Acknowledgement of your withdrawal request")  # préfixé du nom de la boutique
     texte = mail(accuse["ID"])["Text"]
     assert texte.splitlines()[2].startswith("Hello") and "rétractation" not in texte
 
