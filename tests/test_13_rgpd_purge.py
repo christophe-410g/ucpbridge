@@ -341,7 +341,7 @@ def test_compte_rendu_compte_panier_et_adresse_de_l_invite(boutique):
 
 def selection_sessions(lot=500):
     """Identifiants des sessions que purgeSessions() relit (premier lot), pour la durée des sessions configurée."""
-    return php("$c = UcpBridgeRetention::cutoff(UcpBridgePurge::durations()['sessions'], time());\n"
+    return php("Module::getInstanceByName('ucpbridge'); $c = UcpBridgeRetention::cutoff(UcpBridgePurge::durations()['sessions'], time());\n"
                f"foreach ((new UcpBridgePurge(true))->sessionBatch($c, false, '', {int(lot)}) as $r) {{ echo $r['id_session'], \"\\n\"; }}").split()
 
 
@@ -367,7 +367,7 @@ def test_purge_par_lots(boutique):
         sids.append(r.doc["id"])
         vieillir(r.doc["id"])
     liste = ",".join(f"'{s}'" for s in sids)
-    code = ("$r = (new UcpBridgePurge(%s, null, 2))->run(); echo $r['sessions_deleted'];")
+    code = ("Module::getInstanceByName('ucpbridge'); $r = (new UcpBridgePurge(%s, null, 2))->run(); echo $r['sessions_deleted'];")
     assert php(code % "true") == "5"
     assert sql_val(f"SELECT COUNT(*) FROM ps_ucpbridge_session WHERE id_session IN ({liste})") == "5"
     assert php(code % "false") == "5"
