@@ -53,12 +53,18 @@ interface UcpBridgePaymentProvider
     public function refund($transactionId, $amount, $currency, array $context);
 }
 
-/** Résultat normalisé d'un débit : succès, échec ou action requise (3-D Secure). */
+/**
+ * Résultat normalisé d'un débit : succès, échec, action requise (3-D Secure) ou résultat inconnu.
+ * FAILED signifie « aucun débit » (refus du prestataire, requête jamais partie). Quand le prestataire a pu débiter
+ * sans que la réponse soit exploitable (délai dépassé, connexion coupée, erreur 5xx), l'adaptateur renvoie UNKNOWN :
+ * la caisse garde alors la session réservée et le rapprochement la signale comme débit incertain.
+ */
 class UcpBridgePaymentResult
 {
     const SUCCEEDED = 'succeeded';
     const FAILED = 'failed';
     const REQUIRES_ACTION = 'requires_action';
+    const UNKNOWN = 'unknown';
 
     public $status;
     /** Référence de transaction du prestataire (ex. ch_... ou pi_...) */
@@ -87,6 +93,17 @@ class UcpBridgePaymentResult
     {
         $r = new self();
         $r->status = self::FAILED;
+        $r->message = (string) $message;
+        $r->raw = $raw;
+
+        return $r;
+    }
+
+    /** Résultat inconnu : la carte a peut-être été débitée (à vérifier chez le prestataire). */
+    public static function unknown($message, array $raw = [])
+    {
+        $r = new self();
+        $r->status = self::UNKNOWN;
         $r->message = (string) $message;
         $r->raw = $raw;
 

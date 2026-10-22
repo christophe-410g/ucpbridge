@@ -1000,6 +1000,10 @@ class UcpBridgeCart
         if ('canceled' !== self::exposedStatus($s['status'])) {
             $messages = array_merge($messages, $this->disclosures($s['payload']['destination']['address_country'] ?? null));
         }
+        if ('complete_in_progress' === $s['status'] && !empty($s['payload']['charge_unknown'])) {
+            $messages[] = self::msg('payment_verification', 'Résultat du paiement inconnu : ne pas relancer avec un autre moyen de paiement, '
+                . 'le marchand vérifie auprès du prestataire de paiement et rembourse si un débit a eu lieu', 'requires_buyer_input');
+        }
         if ('requires_escalation' === $s['status'] && !empty($s['payload']['escalation_url'])) {
             $messages[] = self::msg('requires_3ds', 'Authentification forte (3-D Secure) requise : l\'acheteur doit finir le paiement sur la boutique', 'requires_buyer_input');
         }
@@ -1107,6 +1111,11 @@ class UcpBridgeCart
             return $this->chargeAndOrder($s, $instr, $provider);
         } catch (Throwable $e) {
             $charged = $this->charged;
+            $cur = null === $charged ? $this->load($s['id_session'], 'checkout') : null;
+            if ($cur && 'complete_in_progress' === $cur['status'] && !empty($cur['payload']['charge_started_at'])) {
+                // Exception pendant ou juste après l'appel au prestataire : débit possible, la session reste réservée.
+                return $this->chargeUnknown($cur, $cur['payload']['charge_provider'] ?? '?', $e->getMessage());
+            }
             if (null === $charged) {
                 // Rien n'a été débité : la session redevient finalisable.
                 unset($s['payload']['charge_started_at']);
@@ -1131,6 +1140,22 @@ class UcpBridgeCart
         $this->save($s, ['complete_in_progress']);
 
         return [200, $this->checkoutDoc($s, $msgs)];
+    }
+
+    /**
+     * Débit engagé au résultat inconnu (délai dépassé, connexion coupée, erreur 5xx, exception de l'adaptateur) : la
+     * carte a pu être débitée. Jamais de retour à ready_for_complete : la session reste réservée avec la trace du débit
+     * engagé (charge_started_at), et le rapprochement la classera en débit incertain, à vérifier chez le prestataire.
+     */
+    private function chargeUnknown(array $s, $providerName, $reason)
+    {
+        $s['payload']['charge_unknown'] = true;
+        $this->save($s, ['complete_in_progress']);
+        PrestaShopLogger::addLog('ucpbridge incident : session ' . $s['id_session'] . ', résultat du débit inconnu (' . $providerName
+            . ', clé d\'idempotence ' . ($s['payload']['charge_idempotency_key'] ?? '?') . ') : ' . $reason
+            . ' ; session laissée en finalisation, à rapprocher et à vérifier chez le prestataire', 3);
+
+        return [200, $this->checkoutDoc($s)];
     }
 
     /** Lignes du panier PrestaShop cohérentes avec celles de la session (chaque ligne présente, quantité suffisante). */
@@ -1219,6 +1244,9 @@ class UcpBridgeCart
             $this->save($s, ['complete_in_progress']);
 
             return [200, $this->checkoutDoc($s)];
+        }
+        if (UcpBridgePaymentResult::UNKNOWN === $pay->status) {
+            return $this->chargeUnknown($s, $provider->getName(), $pay->message);
         }
         if (UcpBridgePaymentResult::SUCCEEDED !== $pay->status) {
             // Refus du prestataire, aucun débit : la session redevient finalisable avec un autre moyen.
