@@ -134,8 +134,8 @@ class UcpBridgeRetention
     /** Message de refus d'une durée trop courte, à l'enregistrement. */
     public static function tooShortMessage($cat)
     {
-        return 'Durée de conservation trop courte (' . self::CATEGORIES[$cat][2] . ') : la loi impose de conserver ces pièces '
-            . '10 ans. Saisissez au moins ' . self::LEGAL_MIN_DAYS[$cat] . ' jours, ou 0 pour ne jamais purger. Aucune durée modifiée.';
+        return UcpBridgeI18n::admin('Retention period too short (%category%): the law requires keeping these records for 10 years. Enter at least %min% days, or 0 to never purge. No period changed.',
+            ['%category%' => self::label($cat), '%min%' => self::LEGAL_MIN_DAYS[$cat]]);
     }
 
     /** Message de refus de la purge (durées trop courtes en configuration), en ligne de commande et au back-office. */
@@ -143,11 +143,12 @@ class UcpBridgeRetention
     {
         $list = [];
         foreach ($bad as $cat => $days) {
-            $list[] = self::CATEGORIES[$cat][2] . ' : ' . (int) $days . ' jours, minimum légal ' . self::LEGAL_MIN_DAYS[$cat] . ' jours';
+            $list[] = UcpBridgeI18n::admin('%category%: %days% days, legal minimum %min% days', ['%category%' => self::label($cat),
+                '%days%' => (int) $days, '%min%' => self::LEGAL_MIN_DAYS[$cat]]);
         }
 
-        return 'Purge refusée, rien n\'a été supprimé : durée de conservation trop courte (' . implode(' ; ', $list) . ', ou 0 pour '
-            . 'ne jamais purger). Corrigez les durées dans la configuration du module.';
+        return UcpBridgeI18n::admin('Purge refused, nothing was deleted: retention period too short (%list%; or 0 to never purge). Fix the periods in the module configuration.',
+            ['%list%' => implode('; ', $list)]);
     }
 
     /** Date limite (Y-m-d H:i:s) : ce qui est plus ancien est purgé. null si la durée vaut 0 (jamais purgé). */

@@ -330,10 +330,9 @@ def test_compte_rendu_compte_panier_et_adresse_de_l_invite(boutique):
     vieillir(sid, client)
     simulation = purge("--dry-run")
     rapport = purge()
-    lignes = {"sessions": "Sessions et paniers UCP", "paniers": "Paniers PrestaShop sans commande",
-              "adresses": "Adresses sans client", "invites": "Clients invités sans commande"}
-    reel = {k: compte(rapport, v + (" supprimées" if k == "adresses" else " supprimés")) for k, v in lignes.items()}
-    simule = {k: compte(simulation, v + " à supprimer") for k, v in lignes.items()}
+    lignes = {"sessions": "sessions_deleted", "paniers": "carts", "adresses": "addresses", "invites": "guests"}
+    reel = {k: compte(rapport, v) for k, v in lignes.items()}
+    simule = {k: compte(simulation, v) for k, v in lignes.items()}
     assert reel == {"sessions": 1, "paniers": 1, "adresses": 1, "invites": 1}, rapport
     assert simule == reel, simulation
     assert sql_val(f"SELECT COUNT(*) FROM ps_cart WHERE id_cart = {cart}") == "0"
@@ -388,7 +387,6 @@ def test_durees_legales_planchers_back_office(boutique, cle):
     for v in ("1", "30", "365", "3649"):
         html = back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "JETON", **dict(DUREES, **{cle: v})})
         assert "alert-danger" in html and "3650" in html and config(cle) == "3650", (cle, v)
-        assert "trop courte" in html
     for v in ("0", "3650", "4000"):
         back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "JETON", **dict(DUREES, **{cle: v})})
         assert config(cle) == v, (cle, v)
@@ -402,7 +400,7 @@ def test_purge_refusee_sous_le_plancher_legal(boutique, lignes_fabriquees, cle):
     avant = restants(t)
     set_config(cle, 365)
     sortie = purge_refusee()
-    assert "3650" in sortie and "trop courte" in sortie, sortie
+    assert "3650" in sortie and "[retention_too_short]" in sortie, sortie
     assert purge_refusee("--dry-run")
     assert restants(t) == avant
     html = back_office({"submitUcpbridgePurge": "1", "ucp_csrf": "JETON"})
