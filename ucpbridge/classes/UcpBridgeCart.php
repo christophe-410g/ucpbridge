@@ -36,6 +36,10 @@ class UcpBridgeCart
     private $buyer;
     /** @var UcpBridgeFulfillment */
     private $fulfillment;
+    /** @var UcpBridgeCheckoutStatus */
+    private $status;
+    /** @var UcpBridgeCheckoutView */
+    private $view;
 
     public function __construct(Context $context, Ucpbridge $module)
     {
@@ -47,6 +51,8 @@ class UcpBridgeCart
         $this->lines = new UcpBridgeCartLines($context, $this->catalog);
         $this->buyer = new UcpBridgeBuyer($context, $this->caller);
         $this->fulfillment = new UcpBridgeFulfillment($context, $this->lines);
+        $this->status = new UcpBridgeCheckoutStatus($module, $this->catalog, $this->fulfillment);
+        $this->view = new UcpBridgeCheckoutView($context, $module, $this->lines, $this->fulfillment, $this->status);
     }
 
     public function catalog()
@@ -208,26 +214,18 @@ class UcpBridgeCart
             // Lien signé (HMAC, 24 h) : rattache CE panier PrestaShop à la session du visiteur.
             'continue_url' => $this->module->buildContinueUrl((int) $s['id_cart'], max(60, $exp - time())),
             'expires_at' => gmdate('Y-m-d\TH:i:s\Z', $exp),
-            'links' => $this->links(),
+            'links' => $this->view->links(),
         ];
         if (!empty($s['payload']['buyer'])) {
             $doc['buyer'] = $s['payload']['buyer'];
         }
         $msgs = null === $msgs ? ($s['payload']['discount_messages'] ?? []) : $msgs;
-        $msgs = array_merge(array_values($msgs), $this->disclosures($s['payload']['context']['address_country'] ?? null));
+        $msgs = array_merge(array_values($msgs), $this->view->disclosures($s['payload']['context']['address_country'] ?? null));
         if ($msgs) {
             $doc['messages'] = array_values($msgs);
         }
 
         return $doc;
-    }
-
-    /** Mentions obligatoires (presentation « disclosure ») pour le pays de livraison. */
-    private function disclosures($iso)
-    {
-        $d = $this->module->withdrawalDisclosure(is_string($iso) ? $iso : null);
-
-        return $d ? [$d] : [];
     }
 
     private static function handedOffMsg()
@@ -291,19 +289,7 @@ class UcpBridgeCart
         return [200, $this->errorDoc([UcpBridgeMessage::error('canceled', 'Panier annulé', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
     }
 
-    /** Liens légaux construits depuis les pages CMS configurées (titres en langue de la boutique). */
-    private function links()
-    {
-        return $this->module->legalLinks();
-    }
-
     /* =============================== Caisse native =============================== */
-
-    private function checkoutEnvelope()
-    {
-        return UcpBridgeMessage::envelope(['dev.ucp.shopping.checkout', 'dev.ucp.shopping.fulfillment', 'dev.ucp.shopping.discount'],
-            Ucpbridge::UCP_VERSION, self::paymentHandlers());
-    }
 
     public function createCheckout(array $body)
     {
@@ -347,13 +333,13 @@ class UcpBridgeCart
         $msgs = $this->applyUpdate($s, $cart, $body, false);
         $this->store->save($s);
 
-        return [201, $this->checkoutDoc($s, $msgs)];
+        return [201, $this->view->checkoutDoc($s, $msgs)];
     }
 
     public function updateCheckout(array $s, array $body)
     {
         if (self::isTerminal($s['status'])) {
-            return [200, $this->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', 'Session ' . self::exposedStatus($s['status']) . ' : modification impossible', 'unrecoverable')])];
+            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', 'Session ' . self::exposedStatus($s['status']) . ' : modification impossible', 'unrecoverable')])];
         }
         // Réservation AVANT toute modification du panier PrestaShop (même statut que celui lu : une écriture concurrente
         // fait échouer la réservation). Une session réservée (finalisation, autre mise à jour, rapprochement) est refusée
@@ -362,10 +348,10 @@ class UcpBridgeCart
         if (self::isBusy($prev) || !$this->store->reserve($s['id_session'], [$prev], 'updating')) {
             $cur = $this->load($s['id_session'], 'checkout') ?: $s;
             if (self::isTerminal($cur['status'])) {
-                return [200, $this->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Session ' . self::exposedStatus($cur['status']) . ' : modification impossible', 'unrecoverable')])];
+                return [200, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Session ' . self::exposedStatus($cur['status']) . ' : modification impossible', 'unrecoverable')])];
             }
 
-            return [409, $this->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Session réservée (finalisation ou mise à jour en cours) : modification refusée', 'recoverable')])];
+            return [409, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Session réservée (finalisation ou mise à jour en cours) : modification refusée', 'recoverable')])];
         }
         $s = $this->load($s['id_session'], 'checkout');
         $s['status'] = $prev;
@@ -379,7 +365,7 @@ class UcpBridgeCart
         }
         $this->store->save($s, ['updating']);
 
-        return [200, $this->checkoutDoc($s, $msgs)];
+        return [200, $this->view->checkoutDoc($s, $msgs)];
     }
 
     /** Applique line_items, buyer et fulfillment. Retourne les messages d'erreur de saisie. */
@@ -444,50 +430,9 @@ class UcpBridgeCart
         // Codes promo en dernier : les règles peuvent dépendre du pays et du transporteur.
         $codes = isset($body['discounts']) ? ($body['discounts']['codes'] ?? []) : null;
         $msgs = array_merge($msgs, $this->discounts()->sync($s, $cart, $codes, !empty($s['payload']['id_carrier'])));
-        $s['status'] = $this->computeStatus($s, $cart);
+        $s['status'] = $this->status->computeStatus($s, $cart);
 
         return $msgs;
-    }
-
-    private function missing(array $s, Cart $cart)
-    {
-        $m = [];
-        if (empty($s['payload']['buyer']['email'])) {
-            $m[] = UcpBridgeMessage::error('missing', 'E-mail de l\'acheteur requis', 'recoverable', '$.buyer.email');
-        }
-        if (empty($s['payload']['id_address'])) {
-            $m[] = UcpBridgeMessage::error('missing', 'Adresse de livraison requise', 'recoverable', '$.fulfillment.methods[0].destinations');
-        } elseif (empty($s['payload']['id_carrier'])) {
-            $m[] = $this->fulfillment->carrierOptions($cart)
-                ? UcpBridgeMessage::error('missing', 'Choisir une option de livraison', 'recoverable', '$.fulfillment.methods[0].groups[0].selected_option_id')
-                : UcpBridgeMessage::error('address_undeliverable', 'Aucun transporteur ne livre cette adresse', 'recoverable', '$.fulfillment.methods[0].destinations');
-        }
-        foreach ($s['payload']['lines'] as $i => $l) {
-            if (!$this->catalog->canOrder($l['id_product'], $l['id_product_attribute'], $l['quantity'])) {
-                $m[] = UcpBridgeMessage::error('out_of_stock', 'Stock insuffisant pour cette déclinaison', 'recoverable', '$.line_items[' . $i . ']');
-            }
-        }
-
-        return $m;
-    }
-
-    private function computeStatus(array $s, Cart $cart)
-    {
-        if (in_array($s['status'], self::LOCKED, true)
-            || ('requires_escalation' === $s['status'] && !empty($s['payload']['escalation_url']))) {
-            return $s['status'];
-        }
-        if ($this->missing($s, $cart)) {
-            return 'incomplete';
-        }
-
-        return $this->needsTermsReview($s) ? 'requires_escalation' : 'ready_for_complete';
-    }
-
-    /** Option « relecture des CGV chez le marchand » active et CGV pas encore acceptées. */
-    private function needsTermsReview(array $s)
-    {
-        return $this->module->termsReviewRequired() && empty($s['payload']['terms_acceptance']);
     }
 
     /** Acceptation des CGV sur la page du module : date, version, IP ; la session redevient finalisable. */
@@ -503,100 +448,15 @@ class UcpBridgeCart
         ];
         $cart = new Cart((int) $s['id_cart']);
         $this->lines->bindContext($cart);
-        $s['status'] = $this->computeStatus($s, $cart);
+        $s['status'] = $this->status->computeStatus($s, $cart);
         $this->store->save($s);
 
         return $s;
     }
 
-    /** Totaux cohérents (somme des lignes = total) : sous-total HT, réductions HT, livraison HT, TVA, total TTC. */
-    private function checkoutTotals(array $s, Cart $cart)
-    {
-        $hasCarrier = !empty($s['payload']['id_carrier']);
-        $mode = $hasCarrier ? Cart::BOTH : Cart::BOTH_WITHOUT_SHIPPING;
-        $country = $cart->id_address_delivery ? Country::getIsoById((int) (new Address((int) $cart->id_address_delivery))->id_country) : null;
-
-        return UcpBridgeTotals::checkout(
-            UcpBridgeCartLines::cents($cart->getOrderTotal(false, Cart::ONLY_PRODUCTS)),
-            $hasCarrier ? UcpBridgeCartLines::cents($cart->getOrderTotal(false, Cart::ONLY_SHIPPING)) : null,
-            UcpBridgeCartLines::cents($cart->getOrderTotal(false, $mode)),
-            UcpBridgeCartLines::cents($cart->getOrderTotal(true, $mode)),
-            $country
-        );
-    }
-
     public function checkoutDoc(array $s, array $extraMsgs = [])
     {
-        $cart = new Cart((int) $s['id_cart']);
-        $this->lines->bindContext($cart);
-        $lines = $this->lines->renderLines($cart, $s['payload']['lines']);
-        $liIds = array_column($lines, 'id');
-        $doc = [
-            'ucp' => $this->checkoutEnvelope(),
-            'id' => $s['id_session'],
-            'status' => self::exposedStatus($s['status']),
-            'currency' => $this->context->currency->iso_code,
-            'line_items' => $lines,
-            'totals' => $this->checkoutTotals($s, $cart),
-            'discounts' => $this->discounts()->render($s, $cart, false, !empty($s['payload']['id_carrier'])),
-            'links' => $this->links(),
-            'expires_at' => gmdate('Y-m-d\TH:i:s\Z', strtotime($s['expires_at'])),
-        ];
-        if (!empty($s['payload']['buyer'])) {
-            $doc['buyer'] = $s['payload']['buyer'];
-            if (!empty($s['payload']['consent'])) {
-                $doc['buyer']['consent'] = $s['payload']['consent'];
-            }
-        }
-        $method = ['id' => 'shipping_1', 'type' => 'shipping', 'line_item_ids' => $liIds, 'destinations' => []];
-        if (!empty($s['payload']['destination'])) {
-            $method['destinations'][] = $s['payload']['destination'];
-            $method['selected_destination_id'] = $s['payload']['destination']['id'];
-            $group = ['id' => 'package_1', 'line_item_ids' => $liIds, 'options' => array_values($this->fulfillment->carrierOptions($cart))];
-            if (!empty($s['payload']['id_carrier'])) {
-                $group['selected_option_id'] = 'carrier_' . (int) $s['payload']['id_carrier'];
-            }
-            $method['groups'] = [$group];
-        }
-        $doc['fulfillment'] = ['methods' => [$method]];
-        $messages = array_merge($extraMsgs, $this->terminalMessages($s));
-        if (!self::isTerminal($s['status']) && !self::isBusy($s['status'])) {
-            $messages = array_merge($messages, $this->missing($s, $cart));
-            if (!$extraMsgs && !empty($s['payload']['discount_messages'])) {
-                $messages = array_merge($messages, $s['payload']['discount_messages']);
-            }
-        }
-        $review = 'requires_escalation' === $s['status'] && empty($s['payload']['escalation_url']);
-        if ($review) {
-            $messages[] = UcpBridgeMessage::error('terms_review_required', 'L\'acheteur doit relire et accepter les conditions générales de vente '
-                . 'sur la boutique avant la commande', 'requires_buyer_review', '$.links[0]');
-        }
-        if ('canceled' !== self::exposedStatus($s['status'])) {
-            $messages = array_merge($messages, $this->disclosures($s['payload']['destination']['address_country'] ?? null));
-        }
-        if ('complete_in_progress' === $s['status'] && !empty($s['payload']['charge_unknown'])) {
-            $messages[] = UcpBridgeMessage::error('payment_verification', 'Résultat du paiement inconnu : ne pas relancer avec un autre moyen de paiement, '
-                . 'le marchand vérifie auprès du prestataire de paiement et rembourse si un débit a eu lieu', 'requires_buyer_input');
-        }
-        if ('requires_escalation' === $s['status'] && !empty($s['payload']['escalation_url'])) {
-            $messages[] = UcpBridgeMessage::error('requires_3ds', 'Authentification forte (3-D Secure) requise : l\'acheteur doit finir le paiement sur la boutique', 'requires_buyer_input');
-        }
-        if ($messages) {
-            $doc['messages'] = array_values($messages);
-        }
-        if ('completed' === $s['status'] && !empty($s['id_order'])) {
-            $doc['order'] = ['id' => (string) $s['order_ref'], 'permalink_url' => $this->orderPermalink((int) $s['id_order'])];
-            if (!empty($s['payload']['transaction_id'])) {
-                $doc['payment'] = ['transaction_id' => $s['payload']['transaction_id'], 'label' => $s['payload']['payment_label'] ?? ''];
-            }
-        } elseif (!self::isTerminal($s['status']) && !self::isBusy($s['status'])) {
-            // Relecture des CGV : page signée du module. Sinon reprise par un humain : le même panier, dans le navigateur.
-            $doc['continue_url'] = $review
-                ? $this->module->termsReviewUrl($s['id_session'], strtotime($s['expires_at']) - time())
-                : $this->module->buildContinueUrl((int) $s['id_cart']);
-        }
-
-        return $doc;
+        return $this->view->checkoutDoc($s, $extraMsgs);
     }
 
     public function cancelCheckout(array $s)
@@ -609,50 +469,26 @@ class UcpBridgeCart
         }
         $busy = 'completed' === $s['status'] || self::isBusy($s['status']);
 
-        return [200, $this->checkoutDoc($s, $busy ? [UcpBridgeMessage::error('not_modifiable', 'completed' === $s['status'] ? 'Commande déjà passée'
+        return [200, $this->view->checkoutDoc($s, $busy ? [UcpBridgeMessage::error('not_modifiable', 'completed' === $s['status'] ? 'Commande déjà passée'
             : ('updating' === $s['status'] ? 'Mise à jour en cours' : 'Finalisation en cours'), 'unrecoverable')] : [])];
-    }
-
-    /** Messages des états terminaux internes : lien de reprise ouvert, commande impossible après débit. */
-    private function terminalMessages(array $s)
-    {
-        if ('handed_off' === $s['status']) {
-            return [UcpBridgeMessage::error('checkout_handed_off', 'L\'acheteur a repris ce panier sur la boutique (lien de reprise ouvert) : '
-                . 'la session ne peut plus être finalisée par l\'API', 'unrecoverable')];
-        }
-        if ('failed' !== $s['status']) {
-            return [];
-        }
-        $f = $s['payload']['failure'] ?? [];
-        $m = [UcpBridgeMessage::error('order_failed', 'Le paiement a été accepté mais la commande n\'a pas pu être créée', 'unrecoverable')];
-        if (!empty($f['unknown'])) {
-            $m = [UcpBridgeMessage::error('order_failed', 'La finalisation a été interrompue avant la création de la commande', 'unrecoverable'),
-                UcpBridgeMessage::error('payment_verification', 'Débit incertain : le marchand vérifie auprès du prestataire de paiement et rembourse si un débit a eu lieu', 'requires_buyer_input')];
-        } elseif (!empty($f['refunded'])) {
-            $m[] = UcpBridgeMessage::info('payment_refunded', 'Le paiement a été remboursé automatiquement');
-        } else {
-            $m[] = UcpBridgeMessage::error('refund_pending', 'Remboursement automatique impossible : le marchand est alerté et doit rembourser', 'requires_buyer_input');
-        }
-
-        return $m;
     }
 
     public function completeCheckout(array $s, array $body)
     {
         if ('updating' === $s['status']) {
-            return [409, $this->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
+            return [409, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
         }
         if (self::isTerminal($s['status']) || self::isBusy($s['status'])) {
-            return [200, $this->checkoutDoc($s)];
+            return [200, $this->view->checkoutDoc($s)];
         }
         $cart = new Cart((int) $s['id_cart']);
         $this->lines->bindContext($cart);
-        $status = $this->computeStatus($s, $cart);
+        $status = $this->status->computeStatus($s, $cart);
         if ('ready_for_complete' !== $status) {
             $s['status'] = $status;
             $this->store->save($s);
 
-            return [200, $this->checkoutDoc($s)];
+            return [200, $this->view->checkoutDoc($s)];
         }
         $instruments = $body['payment']['instruments'] ?? [];
         $instr = null;
@@ -664,7 +500,7 @@ class UcpBridgeCart
         $handlerId = (string) ($instr['handler_id'] ?? '');
         $provider = '' !== $handlerId ? UcpBridgePaymentRegistry::get()->find($handlerId) : null;
         if (!$provider) {
-            return [200, $this->checkoutDoc($s, [UcpBridgeMessage::error('payment_failed', 'Gestionnaire de paiement inconnu ou désactivé : ' . ($handlerId ?: '(aucun)'), 'recoverable', '$.payment.instruments[0].handler_id')])];
+            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('payment_failed', 'Gestionnaire de paiement inconnu ou désactivé : ' . ($handlerId ?: '(aucun)'), 'recoverable', '$.payment.instruments[0].handler_id')])];
         }
 
         // Réservation atomique : une seule requête passe de ready_for_complete à complete_in_progress, quelles que
@@ -673,10 +509,10 @@ class UcpBridgeCart
         if (!$this->store->reserve($s['id_session'], ['ready_for_complete', 'incomplete'], 'complete_in_progress')) {
             $cur = $this->load($s['id_session'], 'checkout') ?: $s;
             if ('updating' === $cur['status']) {
-                return [409, $this->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
+                return [409, $this->view->checkoutDoc($cur, [UcpBridgeMessage::error('not_modifiable', 'Mise à jour de la session en cours : finalisation refusée, réessayer', 'recoverable')])];
             }
 
-            return [200, $this->checkoutDoc($cur)];
+            return [200, $this->view->checkoutDoc($cur)];
         }
         // État relu après la réservation : une mise à jour terminée entre la lecture et la réservation est prise en compte.
         $s = $this->load($s['id_session'], 'checkout');
@@ -710,10 +546,10 @@ class UcpBridgeCart
     {
         unset($s['payload']['charge_started_at']);
         $s['status'] = 'incomplete';
-        $s['status'] = $this->computeStatus($s, $cart);
+        $s['status'] = $this->status->computeStatus($s, $cart);
         $this->store->save($s, ['complete_in_progress']);
 
-        return [200, $this->checkoutDoc($s, $msgs)];
+        return [200, $this->view->checkoutDoc($s, $msgs)];
     }
 
     /**
@@ -729,7 +565,7 @@ class UcpBridgeCart
             . ', clé d\'idempotence ' . ($s['payload']['charge_idempotency_key'] ?? '?') . ') : ' . $reason
             . ' ; session laissée en finalisation, à rapprocher et à vérifier chez le prestataire', 3);
 
-        return [200, $this->checkoutDoc($s)];
+        return [200, $this->view->checkoutDoc($s)];
     }
 
     /** Dans la réservation : contrôles, débit, création de la commande. */
@@ -756,10 +592,10 @@ class UcpBridgeCart
             PrestaShopLogger::addLog('ucpbridge session ' . $s['id_session'] . ' : panier ' . (int) $cart->id
                 . ' modifié hors API (commande existante ou client différent), finalisation refusée sans débit', 2);
 
-            return [200, $this->checkoutDoc($s)];
+            return [200, $this->view->checkoutDoc($s)];
         }
         // Session relue : encore complète ? Panier non vide et conforme aux lignes de la session ?
-        if ($this->missing($s, $cart)) {
+        if ($this->status->missing($s, $cart)) {
             return $this->releaseWithoutCharge($s, $cart, []);
         }
         $amount = (float) $cart->getOrderTotal(true, Cart::BOTH);
@@ -772,7 +608,7 @@ class UcpBridgeCart
         }
 
         // Ce qui est présenté à l'acheteur au moment du paiement : base du journal de preuve.
-        $presented = $this->checkoutDoc(['status' => 'ready_for_complete'] + $s);
+        $presented = $this->view->checkoutDoc(['status' => 'ready_for_complete'] + $s);
         $this->context->customer = $customer;
         $currency = new Currency((int) $cart->id_currency);
         $idemKey = UcpBridgeIdempotency::chargeKey($s['id_session'], $instr, $cents, $currency->iso_code, (int) ($s['payload']['charge_attempt'] ?? 0));
@@ -802,7 +638,7 @@ class UcpBridgeCart
             $s['payload']['escalation_url'] = $pay->actionUrl;
             $this->store->save($s, ['complete_in_progress']);
 
-            return [200, $this->checkoutDoc($s)];
+            return [200, $this->view->checkoutDoc($s)];
         }
         if (UcpBridgePaymentResult::UNKNOWN === $pay->status) {
             return $this->chargeUnknown($s, $provider->getName(), $pay->message);
@@ -815,7 +651,7 @@ class UcpBridgeCart
             $s['status'] = 'ready_for_complete';
             $this->store->save($s, ['complete_in_progress']);
 
-            return [200, $this->checkoutDoc($s, [UcpBridgeMessage::error('payment_failed', $pay->message, 'recoverable', '$.payment.instruments[0].credential')])];
+            return [200, $this->view->checkoutDoc($s, [UcpBridgeMessage::error('payment_failed', $pay->message, 'recoverable', '$.payment.instruments[0].credential')])];
         }
         $charged = $this->charged;
         $error = null;
@@ -862,7 +698,7 @@ class UcpBridgeCart
             PrestaShopLogger::addLog('ucpbridge journal de preuve de la commande ' . (int) $s['id_order'] . ' : ' . $e->getMessage(), 3);
         }
 
-        return [200, $this->checkoutDoc($s)];
+        return [200, $this->view->checkoutDoc($s)];
     }
 
     /** Session terminée par une commande existante (finalisation normale, exception tardive ou rapprochement). */
@@ -892,7 +728,7 @@ class UcpBridgeCart
                 . ' trouvée après « ' . $reason . ' » ; commande conservée, aucun remboursement', 2);
             $s = $this->markCompleted($s, $idOrder, $charged['transaction_id'], $s['payload']['payment_label'] ?? $provider->getName());
 
-            return [200, $this->checkoutDoc($s)];
+            return [200, $this->view->checkoutDoc($s)];
         }
         $refund = null;
         try {
@@ -912,7 +748,7 @@ class UcpBridgeCart
             'refund_id' => $ok ? $refund->transactionId : '', 'at' => gmdate('Y-m-d\TH:i:s\Z')];
         $this->store->save($s, ['complete_in_progress', 'reconciling']);
 
-        return [200, $this->checkoutDoc($s)];
+        return [200, $this->view->checkoutDoc($s)];
     }
 
     /**
@@ -978,7 +814,7 @@ class UcpBridgeCart
         if ('updating' === $was) {
             // Mise à jour interrompue : le panier reflète ce qui a été écrit, la session redevient modifiable.
             $s['status'] = !empty($s['payload']['escalation_url']) ? 'requires_escalation' : 'incomplete';
-            $s['status'] = $this->computeStatus($s, $cart);
+            $s['status'] = $this->status->computeStatus($s, $cart);
             $this->store->save($s, ['reconciling']);
             PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ', mise à jour interrompue, session rendue (' . $s['status'] . ')', 2);
 
@@ -1027,18 +863,11 @@ class UcpBridgeCart
         }
         // Réservation sans débit engagé : la session redevient finalisable.
         $s['status'] = 'incomplete';
-        $s['status'] = $this->computeStatus($s, $cart);
+        $s['status'] = $this->status->computeStatus($s, $cart);
         $this->store->save($s, ['reconciling']);
         PrestaShopLogger::addLog('ucpbridge rapprochement : session ' . $id . ' bloquée sans débit, rendue (' . $s['status'] . ')', 1);
 
         return 'aucun débit, session rendue (' . $s['status'] . ')';
-    }
-
-    private function orderPermalink($idOrder)
-    {
-        $o = new Order((int) $idOrder);
-
-        return $this->context->link->getPageLink('guest-tracking', true, null, ['order_reference' => $o->reference]);
     }
 
     /* ================================== Commandes ================================== */
@@ -1085,7 +914,7 @@ class UcpBridgeCart
             'id' => (string) $s['order_ref'],
             'reference' => $o->reference,
             'checkout_id' => $s['id_session'],
-            'permalink_url' => $this->orderPermalink((int) $o->id),
+            'permalink_url' => $this->view->orderPermalink((int) $o->id),
             'currency' => (new Currency((int) $o->id_currency))->iso_code,
             'status_label' => $state->name,
             'line_items' => $lines,
