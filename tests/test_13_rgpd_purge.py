@@ -246,3 +246,164 @@ def test_session_abandonnee_sans_email_adresse_orpheline_purgee(boutique):
     rapport = purge()
     assert compte(rapport, "Adresses sans client supprimées") >= 1
     assert sql_val(f"SELECT COUNT(*) FROM ps_address WHERE id_address = {adresse}") == "0"
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Relecture 0.1.3-beta : B1 (session « failed » et acheteur à rembourser), I1 (planchers légaux), I2 (sessions déjà
+# minimisées, lots), I3 (compte rendu des invités).
+
+def cli(*args):
+    r = subprocess.run(["docker", "exec", "-u", "www-data", PS, "php", *args], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout
+
+
+def session_en_echec(boutique, mode):
+    """Invité créé par le module, session passée en « failed » par le vrai rapprochement, aucune commande, rien de
+    remboursé. mode « adaptateur_absent » : débit réussi au journal, remboursement impossible (adaptateur introuvable) ;
+    « debit_incertain » : débit engagé sans résultat connu (charge_unknown)."""
+    b = acheteur()
+    s = boutique.session_prete(buyer=b)
+    sid = s["id"]
+    client = client_de(sid)
+    sql(f"UPDATE ps_ucpbridge_session SET status = 'complete_in_progress', date_upd = NOW() - INTERVAL 1 HOUR WHERE id_session = '{sid}'")
+    if mode == "adaptateur_absent":
+        sql("INSERT INTO ps_ucpbridge_payment (session_id, provider, operation, status, transaction_id, amount, currency, message, date_add) "
+            f"VALUES ('{sid}', 'adaptateur_disparu', 'charge', 'succeeded', 'ch_rgpd_{sid[-8:]}', 2990, 'EUR', '', NOW() - INTERVAL 1 HOUR)")
+    else:
+        sql("UPDATE ps_ucpbridge_session SET payload = JSON_SET(payload, '$.charge_started_at', '2026-01-01T00:00:00Z', "
+            f"'$.charge_provider', 'stripe', '$.charge_unknown', true) WHERE id_session = '{sid}'")
+    out = cli("modules/ucpbridge/bin/reconcile.php", "--minutes=15")
+    assert sid in out, out
+    assert sql_val(f"SELECT status FROM ps_ucpbridge_session WHERE id_session = '{sid}'") == "failed"
+    f = json.loads(sql_val(f"SELECT payload FROM ps_ucpbridge_session WHERE id_session = '{sid}'"))["failure"]
+    assert f["refunded"] is False
+    return sid, client, b
+
+
+def vieillir_paiements(sid, jours):
+    sql(f"UPDATE ps_ucpbridge_payment SET date_add = NOW() - INTERVAL {jours} DAY WHERE session_id = '{sid}'")
+
+
+def restant_echec(sid, client, cart, b):
+    return {
+        "session": sql_val(f"SELECT COUNT(*) FROM ps_ucpbridge_session WHERE id_session = '{sid}' AND status = 'failed'"),
+        "client": sql_val(f"SELECT COUNT(*) FROM ps_customer WHERE id_customer = {client}"),
+        "email_client": sql_val(f"SELECT COUNT(*) FROM ps_customer WHERE email = '{b['email']}'"),
+        "panier": sql_val(f"SELECT COUNT(*) FROM ps_cart WHERE id_cart = {cart}"),
+        "invite_du_module": sql_val(f"SELECT COUNT(*) FROM ps_ucpbridge_customer WHERE id_customer = {client}"),
+    }
+
+
+@pytest.mark.parametrize("mode", ["adaptateur_absent", "debit_incertain"])
+def test_session_failed_et_acheteur_a_rembourser_conserves(boutique, mode):
+    """B1 : une session « failed » (débit non remboursé ou incertain) et son acheteur invité suivent la durée du journal
+    des paiements, pas celle des sessions ni des invités : le marchand doit encore savoir qui rembourser."""
+    sid, client, b = session_en_echec(boutique, mode)
+    cart = id_cart(sid)
+    vieillir(sid, client, jours=40)
+    vieillir_paiements(sid, 40)
+    intact = {"session": "1", "client": "1", "email_client": "1", "panier": "1", "invite_du_module": "1"}
+    purge()
+    assert restant_echec(sid, client, cart, b) == intact, f"session failed ou acheteur supprimé au bout de 40 jours ({mode})"
+    # Durée du journal des paiements « jamais » : conservés même après 11 ans.
+    set_config("UCPBRIDGE_RETENTION_PAYMENTS", 0)
+    vieillir(sid, client, jours=4020)
+    vieillir_paiements(sid, 4020)
+    purge()
+    assert restant_echec(sid, client, cart, b) == intact
+    # Durée du journal des paiements écoulée : la session part avec le journal, puis l'invité sans commande.
+    set_config("UCPBRIDGE_RETENTION_PAYMENTS", 3650)
+    purge()
+    assert restant_echec(sid, client, cart, b) == {"session": "0", "client": "0", "email_client": "0", "panier": "0",
+                                                     "invite_du_module": "0"}
+    assert sql_val(f"SELECT COUNT(*) FROM ps_ucpbridge_payment WHERE session_id = '{sid}'") == "0"
+
+
+def test_compte_rendu_compte_panier_et_adresse_de_l_invite(boutique):
+    """I3 : les paniers et adresses supprimés avec un invité figurent au compte rendu, identique en simulation."""
+    purge()  # rien d'ancien en attente : les nombres ci-dessous ne concernent que cet invité
+    s = boutique.session_prete(buyer=acheteur())
+    sid, cart, client = s["id"], id_cart(s["id"]), client_de(s["id"])
+    adresse = int(sql_val(f"SELECT id_address_delivery FROM ps_cart WHERE id_cart = {cart}"))
+    vieillir(sid, client)
+    simulation = purge("--dry-run")
+    rapport = purge()
+    lignes = {"sessions": "Sessions et paniers UCP", "paniers": "Paniers PrestaShop sans commande",
+              "adresses": "Adresses sans client", "invites": "Clients invités sans commande"}
+    reel = {k: compte(rapport, v + (" supprimées" if k == "adresses" else " supprimés")) for k, v in lignes.items()}
+    simule = {k: compte(simulation, v + " à supprimer") for k, v in lignes.items()}
+    assert reel == {"sessions": 1, "paniers": 1, "adresses": 1, "invites": 1}, rapport
+    assert simule == reel, simulation
+    assert sql_val(f"SELECT COUNT(*) FROM ps_cart WHERE id_cart = {cart}") == "0"
+    assert sql_val(f"SELECT COUNT(*) FROM ps_address WHERE id_address = {adresse} AND deleted = 0") == "0"
+
+
+def selection_sessions(lot=500):
+    """Identifiants des sessions que purgeSessions() relit (premier lot), pour la durée des sessions configurée."""
+    return php("Module::getInstanceByName('ucpbridge'); $c = UcpBridgeRetention::cutoff(UcpBridgePurge::durations()['sessions'], time());\n"
+               f"foreach ((new UcpBridgePurge(true))->sessionBatch($c, false, '', {int(lot)}) as $r) {{ echo $r['id_session'], \"\\n\"; }}").split()
+
+
+def test_sessions_deja_minimisees_plus_relues(boutique):
+    """I2 : une session déjà minimisée n'est plus relue par la purge (filtre SQL), la purge avance par lots."""
+    s = boutique.session_prete(buyer=acheteur())
+    r = boutique.payer_mock(s["id"])
+    assert r.doc["status"] == "completed", r.texte[:500]
+    sid = s["id"]
+    vieillir(sid, jours=40)
+    assert sid in selection_sessions()
+    purge()
+    assert json.loads(sql_val(f"SELECT payload FROM ps_ucpbridge_session WHERE id_session = '{sid}'")).get("minimized_at")
+    assert sid not in selection_sessions(), "session déjà minimisée encore relue par purgeSessions()"
+
+
+def test_purge_par_lots(boutique):
+    """I2 : plus de sessions que la taille d'un lot, toutes traitées, en simulation comme pour de bon."""
+    purge()
+    sids = []
+    for _ in range(5):
+        r = boutique.post("/checkout-sessions", {"line_items": [{"item": M_BLANC, "quantity": 1}], "currency": "EUR"})
+        sids.append(r.doc["id"])
+        vieillir(r.doc["id"])
+    liste = ",".join(f"'{s}'" for s in sids)
+    code = ("Module::getInstanceByName('ucpbridge'); $r = (new UcpBridgePurge(%s, null, 2))->run(); echo $r['sessions_deleted'];")
+    assert php(code % "true") == "5"
+    assert sql_val(f"SELECT COUNT(*) FROM ps_ucpbridge_session WHERE id_session IN ({liste})") == "5"
+    assert php(code % "false") == "5"
+    assert sql_val(f"SELECT COUNT(*) FROM ps_ucpbridge_session WHERE id_session IN ({liste})") == "0"
+
+
+def purge_refusee(*args):
+    r = subprocess.run(["docker", "exec", "-u", "www-data", PS, "php", "modules/ucpbridge/bin/purge.php", *args],
+                       capture_output=True, text=True)
+    assert r.returncode != 0, r.stdout
+    return r.stdout + r.stderr
+
+
+@pytest.mark.parametrize("cle", ["UCPBRIDGE_RETENTION_PAYMENTS", "UCPBRIDGE_RETENTION_PROOFS"])
+def test_durees_legales_planchers_back_office(boutique, cle):
+    """I1 : journal des paiements, preuves et rétractations : 3650 jours au moins (durée légale), ou 0 = jamais."""
+    for v in ("1", "30", "365", "3649"):
+        html = back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "JETON", **dict(DUREES, **{cle: v})})
+        assert "alert-danger" in html and "3650" in html and config(cle) == "3650", (cle, v)
+        assert "trop courte" in html
+    for v in ("0", "3650", "4000"):
+        back_office({"submitUcpbridgeRetention": "1", "ucp_csrf": "JETON", **dict(DUREES, **{cle: v})})
+        assert config(cle) == v, (cle, v)
+
+
+@pytest.mark.parametrize("cle", ["UCPBRIDGE_RETENTION_PAYMENTS", "UCPBRIDGE_RETENTION_PROOFS"])
+def test_purge_refusee_sous_le_plancher_legal(boutique, lignes_fabriquees, cle):
+    """I1 : durée légale trop courte en configuration (écrite hors du back-office) : la purge refuse de tourner, en
+    ligne de commande comme depuis le back-office, et ne supprime rien."""
+    t = lignes_fabriquees
+    avant = restants(t)
+    set_config(cle, 365)
+    sortie = purge_refusee()
+    assert "3650" in sortie and "trop courte" in sortie, sortie
+    assert purge_refusee("--dry-run")
+    assert restants(t) == avant
+    html = back_office({"submitUcpbridgePurge": "1", "ucp_csrf": "JETON"})
+    assert "alert-danger" in html and "3650" in html and 'id="ucpbridge-purge-report"' not in html
+    assert restants(t) == avant
