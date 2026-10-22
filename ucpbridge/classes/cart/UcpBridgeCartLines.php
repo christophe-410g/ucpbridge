@@ -33,13 +33,13 @@ class UcpBridgeCartLines
         $lines = [];
         $errors = [];
         if (!is_array($lineItems) || !$lineItems) {
-            return [[], [UcpBridgeMessage::error('invalid', 'line_items est requis et ne peut pas être vide', 'recoverable', '$.line_items')]];
+            return [[], [UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('line_items is required and cannot be empty'), 'recoverable', '$.line_items')]];
         }
         foreach (array_values($lineItems) as $i => $li) {
             $qty = (int) ($li['quantity'] ?? 1);
             $path = '$.line_items[' . $i . ']';
             if ($qty < 1 || $qty > 999) {
-                $errors[] = UcpBridgeMessage::error('invalid', 'Quantité invalide', 'recoverable', $path . '.quantity');
+                $errors[] = UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Invalid quantity'), 'recoverable', $path . '.quantity');
                 continue;
             }
             $item = is_array($li['item'] ?? null) ? $li['item'] : [];
@@ -50,8 +50,7 @@ class UcpBridgeCartLines
                 continue;
             }
             if (!$this->catalog->canOrder($r['id_product'], $r['id_product_attribute'], $qty)) {
-                $errors[] = UcpBridgeMessage::error('out_of_stock', 'Stock insuffisant pour cette déclinaison ('
-                    . $this->catalog->stock($r['id_product'], $r['id_product_attribute']) . ' disponible(s))', 'recoverable', $path);
+                $errors[] = UcpBridgeMessage::error('out_of_stock', UcpBridgeI18n::api('Insufficient stock for this variant (%count% available)', ['%count%' => $this->catalog->stock($r['id_product'], $r['id_product_attribute'])]), 'recoverable', $path);
                 continue;
             }
             $lines[] = [
@@ -141,8 +140,8 @@ class UcpBridgeCartLines
                 'item' => $item,
                 'quantity' => (int) $p['cart_quantity'],
                 'totals' => [
-                    ['type' => 'subtotal', 'amount' => $total, 'display_text' => 'Sous-total TTC'],
-                    ['type' => 'total', 'amount' => $total, 'display_text' => 'Total TTC'],
+                    ['type' => 'subtotal', 'amount' => $total, 'display_text' => UcpBridgeI18n::api('Subtotal incl. tax')],
+                    ['type' => 'total', 'amount' => $total, 'display_text' => UcpBridgeI18n::api('Total incl. tax')],
                 ],
             ];
         }

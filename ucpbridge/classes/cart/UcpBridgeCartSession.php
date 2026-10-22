@@ -57,7 +57,7 @@ class UcpBridgeCartSession
         }
         $cart = $this->lines->newPsCart();
         if (!$this->lines->fillCart($cart, $lines)) {
-            return [200, $this->errorDoc([UcpBridgeMessage::error('out_of_stock', 'Impossible d\'ajouter les articles au panier', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
+            return [200, $this->errorDoc([UcpBridgeMessage::error('out_of_stock', UcpBridgeI18n::api('Unable to add the items to the cart'), 'unrecoverable')], ['dev.ucp.shopping.cart'])];
         }
         if ($this->caller->idUser) {
             $cart->id_customer = $this->caller->idUser;
@@ -86,7 +86,7 @@ class UcpBridgeCartSession
     {
         $idProduct = $this->catalog->productIdFor($id);
         if (!$idProduct) {
-            return $this->errorDoc([UcpBridgeMessage::error('not_found', 'Produit introuvable : ' . $id, 'unrecoverable', '$.id')], ['dev.ucp.shopping.catalog.search']);
+            return $this->errorDoc([UcpBridgeMessage::error('not_found', UcpBridgeI18n::api('Product not found: %id%', ['%id%' => $id]), 'unrecoverable', '$.id')], ['dev.ucp.shopping.catalog.search']);
         }
 
         return [
@@ -101,7 +101,7 @@ class UcpBridgeCartSession
             return $this->errorDoc([self::handedOffMsg()], ['dev.ucp.shopping.cart']);
         }
         if ('active' !== $s['status'] && 'updating' !== $s['status']) {
-            return $this->errorDoc([UcpBridgeMessage::error('not_found', 'Panier expiré ou annulé', 'unrecoverable')], ['dev.ucp.shopping.cart']);
+            return $this->errorDoc([UcpBridgeMessage::error('not_found', UcpBridgeI18n::api('Cart expired or canceled'), 'unrecoverable')], ['dev.ucp.shopping.cart']);
         }
         $cart = new Cart((int) $s['id_cart']);
         $this->lines->bindContext($cart);
@@ -135,8 +135,7 @@ class UcpBridgeCartSession
 
     private static function handedOffMsg()
     {
-        return UcpBridgeMessage::error('checkout_handed_off', 'L\'acheteur a repris ce panier sur la boutique (lien de reprise ouvert) : '
-            . 'il ne peut plus être modifié par l\'API', 'unrecoverable');
+        return UcpBridgeMessage::error('checkout_handed_off', UcpBridgeI18n::api('The buyer took this cart over on the shop (continue link opened): it can no longer be modified through the API'), 'unrecoverable');
     }
 
     public function updateCart(array $s, array $body)
@@ -159,7 +158,7 @@ class UcpBridgeCartSession
                 return [409, $this->cartDoc($cur)];
             }
 
-            return [409, $this->errorDoc([UcpBridgeMessage::error('not_modifiable', 'Panier en cours de modification : réessayer', 'recoverable')], ['dev.ucp.shopping.cart'])];
+            return [409, $this->errorDoc([UcpBridgeMessage::error('not_modifiable', UcpBridgeI18n::api('Cart being modified: try again'), 'recoverable')], ['dev.ucp.shopping.cart'])];
         }
         $s = $this->store->load($s['id_session'], 'cart');
         $s['status'] = 'active';
@@ -168,7 +167,7 @@ class UcpBridgeCartSession
             if ($cart->orderExists()) {
                 $this->store->save($s, ['updating']);
 
-                return [200, $this->errorDoc([UcpBridgeMessage::error('not_found', 'Ce panier a déjà donné lieu à une commande', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
+                return [200, $this->errorDoc([UcpBridgeMessage::error('not_found', UcpBridgeI18n::api('This cart has already been ordered'), 'unrecoverable')], ['dev.ucp.shopping.cart'])];
             }
             $this->lines->fillCart($cart, $lines);
             $s['payload']['lines'] = $lines;
@@ -191,6 +190,6 @@ class UcpBridgeCartSession
         $s['status'] = 'canceled';
         $this->store->save($s);
 
-        return [200, $this->errorDoc([UcpBridgeMessage::error('canceled', 'Panier annulé', 'unrecoverable')], ['dev.ucp.shopping.cart'])];
+        return [200, $this->errorDoc([UcpBridgeMessage::error('canceled', UcpBridgeI18n::api('Cart canceled'), 'unrecoverable')], ['dev.ucp.shopping.cart'])];
     }
 }

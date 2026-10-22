@@ -34,7 +34,7 @@ class UcpBridgeOrderView
         $s = $this->store->loadByOrderRef($ref);
         $caps = ['dev.ucp.shopping.order'];
         if (!$s || !$this->caller->owns($s)) {
-            return [404, UcpBridgeMessage::errorDoc([UcpBridgeMessage::error('not_found', 'Commande introuvable', 'unrecoverable')], $caps, Ucpbridge::UCP_VERSION, $this->context->link->getPageLink('index', true))];
+            return [404, UcpBridgeMessage::errorDoc([UcpBridgeMessage::error('not_found', UcpBridgeI18n::api('Order not found'), 'unrecoverable')], $caps, Ucpbridge::UCP_VERSION, $this->context->link->getPageLink('index', true))];
         }
         $o = new Order((int) $s['id_order']);
         $lines = [];

@@ -29,18 +29,18 @@ class UcpBridgeCheckoutStatus
     {
         $m = [];
         if (empty($s['payload']['buyer']['email'])) {
-            $m[] = UcpBridgeMessage::error('missing', 'E-mail de l\'acheteur requis', 'recoverable', '$.buyer.email');
+            $m[] = UcpBridgeMessage::error('missing', UcpBridgeI18n::api('Buyer e-mail required'), 'recoverable', '$.buyer.email');
         }
         if (empty($s['payload']['id_address'])) {
-            $m[] = UcpBridgeMessage::error('missing', 'Adresse de livraison requise', 'recoverable', '$.fulfillment.methods[0].destinations');
+            $m[] = UcpBridgeMessage::error('missing', UcpBridgeI18n::api('Shipping address required'), 'recoverable', '$.fulfillment.methods[0].destinations');
         } elseif (empty($s['payload']['id_carrier'])) {
             $m[] = $this->fulfillment->carrierOptions($cart)
-                ? UcpBridgeMessage::error('missing', 'Choisir une option de livraison', 'recoverable', '$.fulfillment.methods[0].groups[0].selected_option_id')
-                : UcpBridgeMessage::error('address_undeliverable', 'Aucun transporteur ne livre cette adresse', 'recoverable', '$.fulfillment.methods[0].destinations');
+                ? UcpBridgeMessage::error('missing', UcpBridgeI18n::api('Choose a shipping option'), 'recoverable', '$.fulfillment.methods[0].groups[0].selected_option_id')
+                : UcpBridgeMessage::error('address_undeliverable', UcpBridgeI18n::api('No carrier delivers this address'), 'recoverable', '$.fulfillment.methods[0].destinations');
         }
         foreach ($s['payload']['lines'] as $i => $l) {
             if (!$this->catalog->canOrder($l['id_product'], $l['id_product_attribute'], $l['quantity'])) {
-                $m[] = UcpBridgeMessage::error('out_of_stock', 'Stock insuffisant pour cette déclinaison', 'recoverable', '$.line_items[' . $i . ']');
+                $m[] = UcpBridgeMessage::error('out_of_stock', UcpBridgeI18n::api('Insufficient stock for this variant'), 'recoverable', '$.line_items[' . $i . ']');
             }
         }
 

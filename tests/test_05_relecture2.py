@@ -265,7 +265,7 @@ def test_ib_reservation_sans_debit_rendue_et_bouton_back_office(boutique):
         "Context::getContext()->employee = new Employee(1); $m = Module::getInstanceByName('ucpbridge'); $h = $m->getContent();\n"
         "preg_match('/name=\"ucp_csrf\"[^>]*value=\"([0-9a-f]+)\"/', $h, $t);\n"
         "$_POST = ['submitUcpbridgeReconcile' => '1', 'ucp_csrf' => $t[1]]; echo $m->getContent();")).stdout
-    assert "Rapprocher les sessions bloquées" in html
+    assert 'id="ucpbridge-reconcile-report"' in html and f'<code>{sid}</code>' in html
     assert statut(sid) == "ready_for_complete"
     assert complete(boutique, sid).doc["status"] == "completed"
 

@@ -26,16 +26,16 @@ class UcpBridgeFulfillment
     {
         foreach (['street_address', 'address_locality', 'postal_code', 'address_country'] as $f) {
             if (empty($d[$f])) {
-                return UcpBridgeMessage::error('missing', 'Champ d\'adresse manquant : ' . $f, 'recoverable', '$.fulfillment.methods[0].destinations[0].' . $f);
+                return UcpBridgeMessage::error('missing', UcpBridgeI18n::api('Missing address field: %field%', ['%field%' => $f]), 'recoverable', '$.fulfillment.methods[0].destinations[0].' . $f);
             }
         }
         $idCountry = (int) Country::getByIso(Tools::strtoupper((string) $d['address_country']), true);
         if (!$idCountry) {
-            return UcpBridgeMessage::error('address_undeliverable', 'Pays non livré par la boutique : ' . $d['address_country'], 'recoverable', '$.fulfillment.methods[0].destinations[0].address_country');
+            return UcpBridgeMessage::error('address_undeliverable', UcpBridgeI18n::api('Country not delivered by the shop: %country%', ['%country%' => $d['address_country']]), 'recoverable', '$.fulfillment.methods[0].destinations[0].address_country');
         }
         $country = new Country($idCountry);
         if (!$country->checkZipCode((string) $d['postal_code'])) {
-            return UcpBridgeMessage::error('invalid', 'Code postal invalide pour ' . $country->iso_code, 'recoverable', '$.fulfillment.methods[0].destinations[0].postal_code');
+            return UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Invalid postal code for %country%', ['%country%' => $country->iso_code]), 'recoverable', '$.fulfillment.methods[0].destinations[0].postal_code');
         }
         // Adresse du carnet client : jamais modifiée, une nouvelle adresse est créée à côté.
         $reuse = !empty($s['payload']['id_address']) && empty($s['payload']['address_saved']);
@@ -54,11 +54,11 @@ class UcpBridgeFulfillment
         $a->phone = isset($buyer['phone_number']) ? (string) $buyer['phone_number'] : '';
         $check = $a->validateFields(false, true);
         if (true !== $check) {
-            return UcpBridgeMessage::error('invalid', 'Adresse refusée : ' . strip_tags((string) $check), 'recoverable', '$.fulfillment.methods[0].destinations[0]');
+            return UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Address refused: %reason%', ['%reason%' => strip_tags((string) $check)]), 'recoverable', '$.fulfillment.methods[0].destinations[0]');
         }
         $ok = Validate::isLoadedObject($a) ? $a->update() : $a->add();
         if (!$ok) {
-            return UcpBridgeMessage::error('invalid', 'Adresse refusée par la boutique', 'recoverable', '$.fulfillment.methods[0].destinations[0]');
+            return UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Address refused by the shop'), 'recoverable', '$.fulfillment.methods[0].destinations[0]');
         }
         $s['payload']['id_address'] = (int) $a->id;
         $s['payload']['address_saved'] = false;
@@ -111,11 +111,11 @@ class UcpBridgeFulfillment
     public function applyCarrier(array &$s, Cart $cart, $optionId)
     {
         if (!$cart->id_address_delivery) {
-            return UcpBridgeMessage::error('missing', 'Choisir une adresse avant le transporteur', 'recoverable', '$.fulfillment.methods[0].destinations');
+            return UcpBridgeMessage::error('missing', UcpBridgeI18n::api('Choose an address before the carrier'), 'recoverable', '$.fulfillment.methods[0].destinations');
         }
         $opts = $this->carrierOptions($cart);
         if (!isset($opts[$optionId])) {
-            return UcpBridgeMessage::error('invalid', 'Option de livraison inconnue : ' . $optionId, 'recoverable', '$.fulfillment.methods[0].groups[0].selected_option_id');
+            return UcpBridgeMessage::error('invalid', UcpBridgeI18n::api('Unknown shipping option: %option%', ['%option%' => $optionId]), 'recoverable', '$.fulfillment.methods[0].groups[0].selected_option_id');
         }
         $idCarrier = (int) substr($optionId, strlen('carrier_'));
         $cart->setDeliveryOption([(int) $cart->id_address_delivery => $idCarrier . ',']);

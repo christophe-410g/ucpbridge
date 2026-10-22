@@ -1,9 +1,9 @@
 {* Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE. *}
 <div class="panel" id="ucpbridge-grants">
-  <h3><i class="icon-link"></i> Accès agents actifs</h3>
+  <h3><i class="icon-link"></i> {l s='Active agent access' d='Modules.Ucpbridge.Admin'}</h3>
   {if $ucp_grants}
     <table class="table">
-      <thead><tr><th>Assistant</th><th>Client</th><th>Relié le</th><th>Valable jusqu'au</th><th></th></tr></thead>
+      <thead><tr><th>{l s='Assistant' d='Modules.Ucpbridge.Admin'}</th><th>{l s='Customer' d='Modules.Ucpbridge.Admin'}</th><th>{l s='Linked on' d='Modules.Ucpbridge.Admin'}</th><th>{l s='Valid until' d='Modules.Ucpbridge.Admin'}</th><th></th></tr></thead>
       <tbody>
       {foreach $ucp_grants as $g}
         <tr>
@@ -16,7 +16,7 @@
               <input type="hidden" name="ucp_csrf" value="{$ucp_csrf|escape:'html':'UTF-8'}">
               <input type="hidden" name="revoke_client" value="{$g.client_id|escape:'html':'UTF-8'}">
               <input type="hidden" name="revoke_customer" value="{$g.id_customer|intval}">
-              <button type="submit" class="btn btn-default" name="submitUcpbridgeRevoke" value="1"><i class="icon-ban"></i> Révoquer</button>
+              <button type="submit" class="btn btn-default" name="submitUcpbridgeRevoke" value="1"><i class="icon-ban"></i> {l s='Revoke' d='Modules.Ucpbridge.Admin'}</button>
             </form>
           </td>
         </tr>
@@ -24,6 +24,6 @@
       </tbody>
     </table>
   {else}
-    <p>Aucun assistant relié à un compte client.</p>
+    <p>{l s='No assistant linked to a customer account.' d='Modules.Ucpbridge.Admin'}</p>
   {/if}
 </div>

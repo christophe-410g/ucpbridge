@@ -12,6 +12,7 @@ if (!defined('_PS_VERSION_')) {
     exit;
 }
 
+require_once __DIR__ . '/classes/UcpBridgeI18n.php';
 require_once __DIR__ . '/classes/UcpBridgeItemRef.php';
 require_once __DIR__ . '/classes/UcpBridgeTotals.php';
 require_once __DIR__ . '/classes/UcpBridgeSigner.php';
@@ -89,7 +90,13 @@ class Ucpbridge extends PaymentModule
         $this->ps_versions_compliancy = ['min' => '9.1.0', 'max' => _PS_VERSION_];
         parent::__construct();
         $this->displayName = self::DISPLAY_NAME;
-        $this->description = 'Universal Commerce Protocol : profil, panier transférable, caisse native, déclinaisons, CGV et preuve, MCP.';
+        $this->description = UcpBridgeI18n::admin('Universal Commerce Protocol: profile, transferable cart, native checkout, variants, terms of sale and evidence, MCP.');
+    }
+
+    /** Nouveau système de traduction (domaines Modules.Ucpbridge.*, catalogues XLIFF de translations/). */
+    public function isUsingNewTranslationSystem()
+    {
+        return true;
     }
 
     public function install()
@@ -266,8 +273,8 @@ class Ucpbridge extends PaymentModule
         }
         $h = new Hook();
         $h->name = self::HOOK_PROVIDERS;
-        $h->title = 'UCP Bridge pour PrestaShop : inscription des adaptateurs de paiement';
-        $h->description = 'Paramètre registry (UcpBridgePaymentRegistry) : appeler $params[\'registry\']->register(new MonAdaptateur())';
+        $h->title = UcpBridgeI18n::admin('%name%: registration of payment adapters', ['%name%' => self::DISPLAY_NAME]);
+        $h->description = UcpBridgeI18n::admin('Parameter registry (UcpBridgePaymentRegistry): call $params[\'registry\']->register(new MyAdapter())');
         $h->position = 0;
 
         return (bool) $h->add();
@@ -509,25 +516,29 @@ class Ucpbridge extends PaymentModule
         $e = function ($v) {
             return htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
         };
+        // Langue de l'e-mail (celle de la commande), pas forcément celle du contexte.
+        $locale = UcpBridgeI18n::localeOf((int) ($params['id_lang'] ?? 0));
         $links = $this->legalLinks();
         $withdraw = $this->withdrawalUrl($idOrder);
         $items = '';
-        $txt = "Informations légales\n";
+        $legal = UcpBridgeI18n::shop('Legal information', [], $locale);
+        $right = UcpBridgeI18n::shop('Right of withdrawal: you have 14 days from receipt of your order to withdraw, without having to give any reason.', [], $locale);
+        $button = UcpBridgeI18n::shop('Withdraw from this order', [], $locale);
+        $txt = $legal . "\n";
         foreach (array_unique(array_column($links, 'title', 'url')) as $url => $title) {
             $l = ['url' => $url, 'title' => $title];
             $items .= '<li><a href="' . $e($l['url']) . '">' . $e($l['title']) . '</a></li>';
             $txt .= '- ' . $l['title'] . ' : ' . $l['url'] . "\n";
         }
         $params['extra_template_vars']['{ucpbridge_legal_html}'] = '<table width="100%" style="max-width:600px;margin:16px auto;font-family:Arial,sans-serif;font-size:14px;color:#333">'
-            . '<tr><td style="padding:16px;border-top:1px solid #ddd"><p style="font-weight:bold;margin:0 0 8px">Informations légales</p>'
+            . '<tr><td style="padding:16px;border-top:1px solid #ddd"><p style="font-weight:bold;margin:0 0 8px">' . $e($legal) . '</p>'
             . '<ul style="margin:0 0 12px;padding-left:18px">' . $items . '</ul>'
-            . '<p style="margin:0 0 8px">Droit de rétractation : vous disposez de 14 jours à compter de la réception de votre commande '
-            . 'pour vous rétracter, sans avoir à vous justifier.</p>'
+            . '<p style="margin:0 0 8px">' . $e($right) . '</p>'
             . '<p style="margin:0"><a href="' . $e($withdraw) . '" style="display:inline-block;padding:8px 14px;border:1px solid #31249F;'
-            . 'border-radius:6px;color:#31249F;text-decoration:none">Se rétracter de cette commande</a></p></td></tr></table>';
+            . 'border-radius:6px;color:#31249F;text-decoration:none">' . $e($button) . '</a></p></td></tr></table>';
         $params['extra_template_vars']['{ucpbridge_legal_txt}'] = $txt
-            . "Droit de rétractation : 14 jours à compter de la réception de votre commande.\n"
-            . 'Se rétracter de cette commande : ' . $withdraw . "\n";
+            . UcpBridgeI18n::shop('Right of withdrawal: 14 days from receipt of your order.', [], $locale) . "\n"
+            . UcpBridgeI18n::shop('Withdraw from this order: %url%', ['%url%' => $withdraw], $locale) . "\n";
     }
 
     /* ---------- Mes accès agents (compte client) ---------- */
@@ -556,24 +567,26 @@ class Ucpbridge extends PaymentModule
             return number_format(((int) $c) / 100, 2, ',', ' ') . ' €';
         };
         $rows = [];
-        $rows[] = ['Date', $p['date_add']];
-        $rows[] = ['Agent (UCP-Agent)', $p['agent'] ?: '(non transmis)'];
-        $rows[] = ['Appel API qui a finalisé', trim(($p['caller'] ?? '') . ', IP ' . ($p['api_ip'] ?? '') . ', ' . ($p['api_user_agent'] ?? ''), ', ')];
-        $rows[] = ['Session de caisse', $p['session_id']];
-        $rows[] = ['Version des CGV présentée', $p['terms_version']];
+        $rows['date'] = [UcpBridgeI18n::admin('Date'), $p['date_add']];
+        $rows['agent'] = [UcpBridgeI18n::admin('Agent (UCP-Agent)'), $p['agent'] ?: UcpBridgeI18n::admin('(not sent)')];
+        $rows['api_call'] = [UcpBridgeI18n::admin('API call that completed the order'), trim(($p['caller'] ?? '') . ', IP ' . ($p['api_ip'] ?? '') . ', ' . ($p['api_user_agent'] ?? ''), ', ')];
+        $rows['session'] = [UcpBridgeI18n::admin('Checkout session'), $p['session_id']];
+        $rows['terms_version'] = [UcpBridgeI18n::admin('Version of the terms of sale presented'), $p['terms_version']];
         $acc = $p['terms_acceptance'];
-        $rows[] = ['Case CGV cochée sur la page du marchand', $acc
-            ? 'le ' . $acc['accepted_at'] . ', version ' . $acc['version'] . ', IP ' . $acc['ip']
-                . (isset($p['api_ip']) && $acc['ip'] === $p['api_ip'] ? ' (MÊME IP que l\'appel API de l\'agent)' : '')
-                . '. Attention : preuve non nominative, la case peut avoir été cochée par l\'agent lui-même.'
-            : 'non demandée (relecture désactivée)'];
+        $rows['terms_acceptance'] = [UcpBridgeI18n::admin('Terms of sale box ticked on the merchant\'s page'), $acc
+            ? (isset($p['api_ip']) && $acc['ip'] === $p['api_ip']
+                ? UcpBridgeI18n::admin('on %date%, version %version%, IP %ip% (SAME IP as the agent\'s API call). Warning: non-nominative evidence, the box may have been ticked by the agent itself.', ['%date%' => $acc['accepted_at'], '%version%' => $acc['version'], '%ip%' => $acc['ip']])
+                : UcpBridgeI18n::admin('on %date%, version %version%, IP %ip%. Warning: non-nominative evidence, the box may have been ticked by the agent itself.', ['%date%' => $acc['accepted_at'], '%version%' => $acc['version'], '%ip%' => $acc['ip']]))
+            : UcpBridgeI18n::admin('not requested (review disabled)')];
         $cons = [];
         foreach ((array) $p['consent'] as $k => $v) {
-            $cons[] = $k . ' : ' . (null === $v ? 'non exprimé' : ($v ? 'oui' : 'non'));
+            $cons[] = $k . ' : ' . (null === $v ? UcpBridgeI18n::admin('not expressed') : ($v ? UcpBridgeI18n::admin('yes') : UcpBridgeI18n::admin('no')));
         }
-        $rows[] = ['Consentements (buyer_consent)', implode(' ; ', $cons)];
+        $rows['consent'] = [UcpBridgeI18n::admin('Consents (buyer_consent)'), implode(' ; ', $cons)];
         $w = UcpBridgeProof::withdrawal($idOrder);
-        $rows[] = ['Rétractation en ligne', $w ? 'demandée le ' . $w['date_add'] . ' (IP ' . $w['ip'] . ')' . ($w['email_sent'] ? ', accusé de réception envoyé' : '') : 'aucune demande'];
+        $rows['withdrawal'] = [UcpBridgeI18n::admin('Online withdrawal'), !$w ? UcpBridgeI18n::admin('no request')
+            : ($w['email_sent'] ? UcpBridgeI18n::admin('requested on %date% (IP %ip%), acknowledgement sent', ['%date%' => $w['date_add'], '%ip%' => $w['ip']])
+                : UcpBridgeI18n::admin('requested on %date% (IP %ip%)', ['%date%' => $w['date_add'], '%ip%' => $w['ip']]))];
         $links = [];
         foreach ((array) $p['links'] as $l) {
             $links[] = ['type' => (string) $l['type'], 'url' => (string) $l['url'], 'title' => (string) ($l['title'] ?? $l['url'])];
@@ -588,9 +601,11 @@ class Ucpbridge extends PaymentModule
         }
 
         return $this->renderTemplate('hook/order_proof.tpl', [
-            'ucp_rows' => array_map(function ($r) {
-                return ['label' => $r[0], 'value' => (string) $r[1]];
-            }, $rows),
+            'ucp_rows' => array_map(function ($k, $r) {
+                return ['key' => $k, 'label' => $r[0], 'value' => (string) $r[1]];
+            }, array_keys($rows), $rows),
+            // État stable de la rétractation (lu par les tests et les intégrations, indépendant de la langue).
+            'ucp_withdrawal_state' => $w ? 'requested' : 'none',
             'ucp_links' => $links,
             'ucp_disclosures' => $disclosures,
             'ucp_totals' => $totals,

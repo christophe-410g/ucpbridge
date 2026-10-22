@@ -81,18 +81,16 @@ class UcpBridgeCheckoutView
         }
         $review = 'requires_escalation' === $s['status'] && empty($s['payload']['escalation_url']);
         if ($review) {
-            $messages[] = UcpBridgeMessage::error('terms_review_required', 'L\'acheteur doit relire et accepter les conditions générales de vente '
-                . 'sur la boutique avant la commande', 'requires_buyer_review', '$.links[0]');
+            $messages[] = UcpBridgeMessage::error('terms_review_required', UcpBridgeI18n::api('The buyer must review and accept the terms of sale on the shop before ordering'), 'requires_buyer_review', '$.links[0]');
         }
         if ('canceled' !== UcpBridgeSessionStore::exposedStatus($s['status'])) {
             $messages = array_merge($messages, $this->disclosures($s['payload']['destination']['address_country'] ?? null));
         }
         if ('complete_in_progress' === $s['status'] && !empty($s['payload']['charge_unknown'])) {
-            $messages[] = UcpBridgeMessage::error('payment_verification', 'Résultat du paiement inconnu : ne pas relancer avec un autre moyen de paiement, '
-                . 'le marchand vérifie auprès du prestataire de paiement et rembourse si un débit a eu lieu', 'requires_buyer_input');
+            $messages[] = UcpBridgeMessage::error('payment_verification', UcpBridgeI18n::api('Payment result unknown: do not retry with another payment method, the merchant checks with the payment provider and refunds if a charge took place'), 'requires_buyer_input');
         }
         if ('requires_escalation' === $s['status'] && !empty($s['payload']['escalation_url'])) {
-            $messages[] = UcpBridgeMessage::error('requires_3ds', 'Authentification forte (3-D Secure) requise : l\'acheteur doit finir le paiement sur la boutique', 'requires_buyer_input');
+            $messages[] = UcpBridgeMessage::error('requires_3ds', UcpBridgeI18n::api('Strong authentication (3-D Secure) required: the buyer must finish the payment on the shop'), 'requires_buyer_input');
         }
         if ($messages) {
             $doc['messages'] = array_values($messages);
@@ -132,21 +130,20 @@ class UcpBridgeCheckoutView
     public function terminalMessages(array $s)
     {
         if ('handed_off' === $s['status']) {
-            return [UcpBridgeMessage::error('checkout_handed_off', 'L\'acheteur a repris ce panier sur la boutique (lien de reprise ouvert) : '
-                . 'la session ne peut plus être finalisée par l\'API', 'unrecoverable')];
+            return [UcpBridgeMessage::error('checkout_handed_off', UcpBridgeI18n::api('The buyer took this cart over on the shop (continue link opened): the session can no longer be completed through the API'), 'unrecoverable')];
         }
         if ('failed' !== $s['status']) {
             return [];
         }
         $f = $s['payload']['failure'] ?? [];
-        $m = [UcpBridgeMessage::error('order_failed', 'Le paiement a été accepté mais la commande n\'a pas pu être créée', 'unrecoverable')];
+        $m = [UcpBridgeMessage::error('order_failed', UcpBridgeI18n::api('The payment was accepted but the order could not be created'), 'unrecoverable')];
         if (!empty($f['unknown'])) {
-            $m = [UcpBridgeMessage::error('order_failed', 'La finalisation a été interrompue avant la création de la commande', 'unrecoverable'),
-                UcpBridgeMessage::error('payment_verification', 'Débit incertain : le marchand vérifie auprès du prestataire de paiement et rembourse si un débit a eu lieu', 'requires_buyer_input')];
+            $m = [UcpBridgeMessage::error('order_failed', UcpBridgeI18n::api('Completion was interrupted before the order was created'), 'unrecoverable'),
+                UcpBridgeMessage::error('payment_verification', UcpBridgeI18n::api('Uncertain charge: the merchant checks with the payment provider and refunds if a charge took place'), 'requires_buyer_input')];
         } elseif (!empty($f['refunded'])) {
-            $m[] = UcpBridgeMessage::info('payment_refunded', 'Le paiement a été remboursé automatiquement');
+            $m[] = UcpBridgeMessage::info('payment_refunded', UcpBridgeI18n::api('The payment was refunded automatically'));
         } else {
-            $m[] = UcpBridgeMessage::error('refund_pending', 'Remboursement automatique impossible : le marchand est alerté et doit rembourser', 'requires_buyer_input');
+            $m[] = UcpBridgeMessage::error('refund_pending', UcpBridgeI18n::api('Automatic refund impossible: the merchant has been alerted and must refund'), 'requires_buyer_input');
         }
 
         return $m;
