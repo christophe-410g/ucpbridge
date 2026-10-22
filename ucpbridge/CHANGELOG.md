@@ -10,6 +10,11 @@ Corrections
   écriture au journal des paiements. Une erreur du journal (`ps_ucpbridge_payment`) n'interrompt plus la caisse :
   la commande est créée, l'échec du journal est signalé au journal PrestaShop (gravité 3) avec la référence du débit,
   et une exception ultérieure mène au remboursement automatique au lieu de faire croire que rien n'a été débité.
+- Paiement (#1) : un débit au résultat inconnu (délai dépassé, connexion coupée, réponse 5xx sans charge, exception
+  de l'adaptateur pendant le débit) n'est plus traité comme un refus. Nouveau statut `UcpBridgePaymentResult::UNKNOWN`
+  (`UcpBridgePaymentResult::unknown()`) ; la session reste `complete_in_progress` avec `charge_started_at`, l'agent
+  reçoit `payment_verification` et le rapprochement la classe en « débit incertain, à vérifier chez le prestataire ».
+  Une erreur cURL survenue avant l'envoi (connexion refusée, nom d'hôte introuvable) reste un refus sans débit.
 
 ## 0.1.2-beta (2026-10-21) : première publication
 

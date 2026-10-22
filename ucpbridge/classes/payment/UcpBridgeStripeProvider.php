@@ -121,12 +121,22 @@ class UcpBridgeStripeProvider implements UcpBridgePaymentProvider
             'metadata[ucp_session]' => (string) ($context['session_id'] ?? ''),
             'metadata[id_cart]' => (string) ($context['id_cart'] ?? ''),
         ];
-        list($code, $doc, $err) = $this->post('/v1/charges', $params, 'ucpbridge-' . ($context['idempotency_key'] ?? ($context['session_id'] ?? '')));
+        list($code, $doc, $err, $errno) = $this->post('/v1/charges', $params, 'ucpbridge-' . ($context['idempotency_key'] ?? ($context['session_id'] ?? '')));
         if ($err) {
             // Détail technique (hôte, erreur réseau) au journal de la boutique, message générique à l'agent.
             PrestaShopLogger::addLog('ucpbridge Stripe injoignable : ' . $err, 3);
+            if (self::neverSent($errno)) {
+                return UcpBridgePaymentResult::fail('Passerelle de paiement injoignable, réessayer plus tard');
+            }
 
-            return UcpBridgePaymentResult::fail('Passerelle de paiement injoignable, réessayer plus tard');
+            // Requête peut-être reçue par Stripe (délai dépassé, connexion coupée) : débit possible.
+            return UcpBridgePaymentResult::unknown('Réponse de la passerelle de paiement perdue : débit à vérifier');
+        }
+        if ($code >= 500 && 'charge' !== ($doc['object'] ?? '')) {
+            // Erreur serveur Stripe : le débit a pu avoir lieu (https://docs.stripe.com/error-low-level#server-errors).
+            PrestaShopLogger::addLog('ucpbridge Stripe erreur ' . $code . ' sans charge : ' . (string) ($doc['error']['message'] ?? ''), 3);
+
+            return UcpBridgePaymentResult::unknown('Erreur de la passerelle de paiement (HTTP ' . $code . ') : débit à vérifier', $doc);
         }
         if (isset($doc['error'])) {
             $e = $doc['error'];
@@ -167,6 +177,16 @@ class UcpBridgeStripeProvider implements UcpBridgePaymentProvider
         return UcpBridgePaymentResult::ok((string) $doc['id'], 'Remboursement Stripe', $doc);
     }
 
+    /**
+     * Erreur cURL survenue avant tout envoi de la requête (résolution DNS, connexion refusée, proxy) : Stripe n'a rien
+     * reçu, aucun débit possible. Toute autre erreur (délai dépassé, connexion coupée, réponse vide) laisse le
+     * résultat inconnu.
+     */
+    public static function neverSent($errno)
+    {
+        return in_array((int) $errno, [5, 6, 7], true); // COULDNT_RESOLVE_PROXY, COULDNT_RESOLVE_HOST, COULDNT_CONNECT
+    }
+
     private function post($path, array $params, $idemKey)
     {
         $ch = curl_init($this->base() . $path);
@@ -182,10 +202,11 @@ class UcpBridgeStripeProvider implements UcpBridgePaymentProvider
         ]);
         $body = curl_exec($ch);
         $err = false === $body ? curl_error($ch) : '';
+        $errno = false === $body ? curl_errno($ch) : 0;
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
         $doc = is_string($body) ? json_decode($body, true) : null;
 
-        return [$code, is_array($doc) ? $doc : [], $err];
+        return [$code, is_array($doc) ? $doc : [], $err, $errno];
     }
 }
