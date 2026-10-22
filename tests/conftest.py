@@ -3,7 +3,6 @@
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 """
 import base64
-import functools
 import hashlib
 import http.server
 import json
@@ -275,10 +274,19 @@ def set_config(nom, valeur):
     php(f"Configuration::updateValue({json.dumps(nom)}, {json.dumps(str(valeur))});")
 
 
-@functools.lru_cache(maxsize=None)
+_ADMIN_DIR = []
+
+
 def admin_dir():
+    """Dossier d'administration, relu tant qu'il s'appelle encore « admin » : PrestaShop 8 le renomme (admin + suffixe
+    aléatoire) à la première ouverture de la page de connexion. Le nom définitif est ensuite gardé en mémoire."""
+    if _ADMIN_DIR:
+        return _ADMIN_DIR[0]
     r = subprocess.run(["docker", "exec", PS, "sh", "-c", "ls -d /var/www/html/admin* | grep -v admin-api"], capture_output=True, text=True)
-    return os.path.basename(r.stdout.strip())
+    nom = os.path.basename(r.stdout.strip())
+    if nom != "admin":
+        _ADMIN_DIR.append(nom)
+    return nom
 
 
 def admin_login(page):
