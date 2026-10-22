@@ -2,6 +2,16 @@
 
 Copyright (c) 2026 Friends of Presta. Auteur : Christophe Vidal, pour le podcast Contrib. Licence AFL-3.0 (Academic Free License 3.0), voir LICENSE.
 
+## 0.1.3-beta (non publiée)
+
+Corrections
+
+- Paiement (#1) : un débit au résultat inconnu (délai dépassé, connexion coupée, réponse 5xx sans charge, exception
+  de l'adaptateur pendant le débit) n'est plus traité comme un refus. Nouveau statut `UcpBridgePaymentResult::UNKNOWN`
+  (`UcpBridgePaymentResult::unknown()`) ; la session reste `complete_in_progress` avec `charge_started_at`, l'agent
+  reçoit `payment_verification` et le rapprochement la classe en « débit incertain, à vérifier chez le prestataire ».
+  Une erreur cURL survenue avant l'envoi (connexion refusée, nom d'hôte introuvable) reste un refus sans débit.
+
 ## 0.1.2-beta (2026-10-21) : première publication
 
 - Licence AFL-3.0 (Academic Free License 3.0). Titulaire des droits : Friends of Presta. Auteur : Christophe Vidal,

@@ -54,8 +54,9 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   (`order_payment.transaction_id`). Interface `UcpBridgePaymentProvider` :
   `getName()`, `handlers()` (déclarations UCP), `supports($handlerName, $handlerId)`,
   `charge($credential, $amount, $currency, $context)` qui renvoie un `UcpBridgePaymentResult`
-  (`succeeded` + référence, `failed` + message, ou `requires_action` + URL : la session passe alors en
-  `requires_escalation` avec `continue_url`, prévu pour 3-D Secure), et `refund($transactionId, $amount, $currency,
+  (`succeeded` + référence, `failed` + message, `requires_action` + URL : la session passe alors en
+  `requires_escalation` avec `continue_url`, prévu pour 3-D Secure, ou `unknown` + message quand le prestataire a pu
+  débiter sans réponse exploitable : délai dépassé, connexion coupée, erreur 5xx), et `refund($transactionId, $amount, $currency,
   $context)`, appelée automatiquement si la commande ne peut pas être créée après un débit réussi.
   Chaque débit et chaque remboursement est consigné dans `ps_ucpbridge_payment` (session, adaptateur, opération,
   statut, référence, montant).
@@ -132,6 +133,12 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   les hooks des modules tiers et les e-mails, une exception à ce stade laisse une commande valide. Dans ce cas, rien
   n'est remboursé, la session est terminée (`completed`) avec cette commande et l'exception est journalisée en
   avertissement (« commande conservée, aucun remboursement »).
+- **Débit au résultat inconnu** : `failed` signifie « aucun débit » (refus du prestataire, requête jamais partie :
+  connexion refusée, nom d'hôte introuvable). Un résultat `unknown` (délai dépassé, connexion coupée après l'envoi,
+  erreur 5xx sans charge, exception levée par l'adaptateur pendant le débit) n'est jamais traité comme un refus : la
+  session reste `complete_in_progress` avec la trace du débit engagé, l'agent reçoit le message
+  `payment_verification` (ne pas relancer avec un autre moyen de paiement), un nouvel essai ne redébite pas, et le
+  rapprochement la classe en « débit incertain, à vérifier chez le prestataire ».
 - **Rapprochement des sessions bloquées** : si le processus PHP meurt pendant la finalisation (erreur fatale,
   `max_execution_time`, processus tué), la session reste `complete_in_progress`. La commande de rapprochement la
   traite dès qu'elle est réservée depuis plus de N minutes (15 par défaut) : commande trouvée sur le panier = session
