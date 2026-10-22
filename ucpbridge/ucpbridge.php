@@ -26,6 +26,7 @@ require_once __DIR__ . '/classes/UcpBridgeSchema.php';
 require_once __DIR__ . '/classes/UcpBridgeDiscount.php';
 require_once __DIR__ . '/classes/UcpBridgeOAuth.php';
 require_once __DIR__ . '/classes/UcpBridgeProof.php';
+require_once __DIR__ . '/classes/UcpBridgeExport.php';
 require_once __DIR__ . '/classes/UcpBridgePage.php';
 require_once __DIR__ . '/classes/UcpBridgeMcp.php';
 require_once __DIR__ . '/classes/payment/UcpBridgePaymentProvider.php';
@@ -52,7 +53,7 @@ class Ucpbridge extends PaymentModule
     ];
     const CONFIG_KEYS = ['UCPBRIDGE_API_KEY', 'UCPBRIDGE_API_KEYS', 'UCPBRIDGE_LINK_SECRET', 'UCPBRIDGE_MOCK_SECRET', 'UCPBRIDGE_STRIPE_KEY', 'UCPBRIDGE_STRIPE_PK',
         'UCPBRIDGE_STRIPE_API_BASE', 'UCPBRIDGE_GPAY_MERCHANT_ID', 'UCPBRIDGE_OAUTH_CLIENTS', 'UCPBRIDGE_TERMS_REVIEW',
-        'UCPBRIDGE_CMS_TERMS', 'UCPBRIDGE_CMS_PRIVACY', 'UCPBRIDGE_CMS_REFUND', 'UCPBRIDGE_CMS_SHIPPING'];
+        'UCPBRIDGE_CMS_TERMS', 'UCPBRIDGE_CMS_PRIVACY', 'UCPBRIDGE_CMS_REFUND', 'UCPBRIDGE_CMS_SHIPPING', 'UCPBRIDGE_UNINSTALL_PURGE'];
     const HOOKS = ['moduleRoutes', 'actionHtaccessCreate', 'displayAdminOrderMain', 'actionEmailAddAfterContent',
         'actionGetExtraMailTemplateVars', 'displayCustomerAccount'];
     /** Durée de validité du lien de rétractation envoyé par e-mail (le droit court 14 jours après la réception). */
@@ -81,6 +82,9 @@ class Ucpbridge extends PaymentModule
             && $this->installDb()
             && UcpBridgeOAuth::installDb()
             && UcpBridgeProof::installDb()
+            // Tables de preuve conservées par une désinstallation antérieure : complétées si elles datent d'une version
+            // plus ancienne, sans toucher aux lignes.
+            && UcpBridgeSchema::addMissingColumns(self::ADDED_COLUMNS)
             && $this->installConfig()
             && $this->installHtaccess();
     }
@@ -119,11 +123,13 @@ class Ucpbridge extends PaymentModule
     public function uninstall()
     {
         $this->removeHtaccess();
+        // Choix lu AVANT la suppression de la configuration : sans case cochée, les preuves sont conservées.
+        $dropEvidence = (bool) Configuration::get('UCPBRIDGE_UNINSTALL_PURGE');
         foreach (self::CONFIG_KEYS as $k) {
             Configuration::deleteByName($k);
         }
         UcpBridgeOAuth::uninstallDb();
-        UcpBridgeProof::uninstallDb();
+        UcpBridgeProof::uninstallDb($dropEvidence);
         Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'ucpbridge_session`');
         Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'ucpbridge_idempotency`');
         $ok = parent::uninstall();
@@ -192,6 +198,8 @@ class Ucpbridge extends PaymentModule
             'UCPBRIDGE_GPAY_MERCHANT_ID' => '',
             'UCPBRIDGE_OAUTH_CLIENTS' => '{}',
             'UCPBRIDGE_TERMS_REVIEW' => 0,
+            // 1 = supprimer journal de preuve, rétractations et journal des paiements à la désinstallation (0 = conserver).
+            'UCPBRIDGE_UNINSTALL_PURGE' => 0,
         ];
         // Pages légales devinées depuis la boutique (CGV : la page des conditions du tunnel de commande).
         foreach (self::CMS_KEYS as $type => $key) {
@@ -656,9 +664,49 @@ class Ucpbridge extends PaymentModule
         return hash_hmac('sha256', 'bo-config|' . (int) $this->context->employee->id, (string) Configuration::get('UCPBRIDGE_LINK_SECRET'));
     }
 
+    /** Lien de téléchargement de l'export CSV (même page, jeton anti-CSRF du module). */
+    private function exportUrl()
+    {
+        return $this->context->link->getAdminLink('AdminModules', true, [], ['configure' => $this->name,
+            'ucpbridge_export' => 'proofs', 'ucp_csrf' => $this->configToken()]);
+    }
+
+    /** Envoie le CSV des preuves et rétractations et termine la requête. */
+    private function sendExport()
+    {
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . UcpBridgeExport::filename(time()) . '"');
+        header('Cache-Control: no-store');
+        $out = fopen('php://output', 'w');
+        UcpBridgeExport::write($out);
+        fclose($out);
+        exit;
+    }
+
+    /** Export des preuves et choix de conservation à la désinstallation. */
+    private function evidencePanel(callable $esc)
+    {
+        $n = (int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'ucpbridge_proof`');
+        $w = (int) Db::getInstance()->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'ucpbridge_withdrawal`');
+
+        return '<h4>Journal de preuve et rétractations</h4><p>' . $n . ' preuve(s) de commande, ' . $w . ' demande(s) de rétractation. '
+            . 'Conservés à la désinstallation (avec le journal des paiements) et retrouvés à la réinstallation, sauf choix contraire '
+            . 'ci-dessus.</p><p><a id="ucpbridge-export" class="btn btn-default" href="' . $esc($this->exportUrl()) . '">'
+            . 'Exporter les preuves et rétractations (CSV)</a></p>';
+    }
+
     public function getContent()
     {
         $out = '';
+        if ('proofs' === Tools::getValue('ucpbridge_export')) {
+            if (hash_equals($this->configToken(), (string) Tools::getValue('ucp_csrf'))) {
+                $this->sendExport();
+            }
+            $out .= $this->displayError('Jeton de sécurité invalide : export non effectué.');
+        }
         if (Tools::isSubmit('submitUcpbridgeReconcile')) {
             if (!hash_equals($this->configToken(), (string) Tools::getValue('ucp_csrf'))) {
                 $out .= $this->displayError('Jeton de sécurité invalide : rapprochement non effectué.');
@@ -703,6 +751,7 @@ class Ucpbridge extends PaymentModule
                     Configuration::updateValue($key, isset($pages[$id]) ? $id : 0);
                 }
                 Configuration::updateValue('UCPBRIDGE_TERMS_REVIEW', Tools::getValue('UCPBRIDGE_TERMS_REVIEW') ? 1 : 0);
+                Configuration::updateValue('UCPBRIDGE_UNINSTALL_PURGE', Tools::getValue('UCPBRIDGE_UNINSTALL_PURGE') ? 1 : 0);
                 $out .= $this->displayConfirmation('Configuration enregistrée.');
             }
         }
@@ -747,8 +796,12 @@ class Ucpbridge extends PaymentModule
             . $field('UCPBRIDGE_GPAY_MERCHANT_ID', 'Google Pay merchant_id (test)')
             . '<h4>Identity linking (OAuth 2.0)</h4><p>Clients enregistrés : <code>'
             . $esc(implode(', ', array_keys(UcpBridgeOAuth::clients())) ?: 'aucun') . '</code> (enregistrement par script, secret affiché une seule fois)</p>'
+            . '<h4>Désinstallation</h4><p><label><input type="checkbox" name="UCPBRIDGE_UNINSTALL_PURGE" value="1"'
+            . (Configuration::get('UCPBRIDGE_UNINSTALL_PURGE') ? ' checked' : '') . '> Supprimer aussi le journal de preuve, les demandes '
+            . 'de rétractation et le journal des paiements à la prochaine désinstallation (irréversible : exporter d\'abord). '
+            . 'Case décochée : ces données sont conservées et retrouvées à la réinstallation.</label></p>'
             . '<button class="btn btn-primary" name="submitUcpbridge" value="1">Enregistrer</button></form>'
-            . $this->apiKeysPanel($esc) . $this->grantsPanel($esc) . $this->reconcilePanel($esc) . '</div>';
+            . $this->apiKeysPanel($esc) . $this->grantsPanel($esc) . $this->evidencePanel($esc) . $this->reconcilePanel($esc) . '</div>';
 
         return $out;
     }

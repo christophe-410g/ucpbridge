@@ -16,6 +16,13 @@ Nouveautés
   (`charge_attempt`, `charge_unknown`), lues avec une valeur par défaut. Configuration : la clé unique
   `UCPBRIDGE_API_KEY` (#5) est migrée vers la plateforme `default` de `UCPBRIDGE_API_KEYS` en tête de la mise à jour,
   avant la création des clés manquantes (sinon une clé neuve aurait pris sa place). Version du module : 0.1.3.
+- Désinstallation (#12) : le journal de preuve (`ps_ucpbridge_proof`), les demandes de rétractation
+  (`ps_ucpbridge_withdrawal`) et le journal des paiements (`ps_ucpbridge_payment`) sont conservés par défaut et
+  retrouvés à la réinstallation (colonnes complétées si les tables datent d'une version plus ancienne). Suppression
+  seulement sur choix explicite : case « Supprimer aussi... à la prochaine désinstallation » de la configuration
+  (`UCPBRIDGE_UNINSTALL_PURGE`, 0 par défaut, effacée avec la configuration). Export CSV des preuves et rétractations
+  depuis la configuration (`UcpBridgeExport`, jeton anti-CSRF du module) : UTF-8 avec BOM, séparateur `;`, une ligne
+  par commande, champs JSON tels qu'enregistrés, valeurs commençant par `=`, `+`, `-` ou `@` neutralisées.
 
 Corrections
 

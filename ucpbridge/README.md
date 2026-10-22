@@ -316,8 +316,9 @@ Preuve, données personnelles, conformité
 - **Acceptation des CGV non probante** (voir plus haut) : la case peut être cochée par l'agent.
 - **Aucune durée de conservation ni purge** : sessions (e-mail, nom, adresse, téléphone), clients invités créés dès
   qu'un e-mail est fourni (même sans commande), codes et jetons OAuth expirés, journal des paiements restent en base.
-- **La désinstallation supprime le journal de preuve et les demandes de rétractation**, sans confirmation : exporter
-  ces tables avant toute désinstallation (une réinstallation pour mise à jour efface les preuves).
+- Tables de preuve conservées après une désinstallation : elles restent en base sans module pour les lire (export CSV
+  à faire avant, ou réinstaller le module pour les consulter). La 0.1.2 et les versions antérieures, elles, les
+  suppriment à la désinstallation : passer à la 0.1.3 par mise à jour, jamais par désinstallation.
 - Aucune chaîne traduisible (`$this->l()` / `trans()`) : messages aux agents en français, modèle `mails/en/` en français.
 
 Compatibilité et code
@@ -343,9 +344,13 @@ rm -rf var/cache/*
 
 À l'installation, le module génère la clé API de la plateforme par défaut (`ucpk_...`) et le secret HMAC des liens signés ; aucun secret,
 mot de passe ni clé n'est livré dans le code. Il crée ses tables (`ps_ucpbridge_*`), ses hooks et le hook d'extension
-`actionUcpBridgeRegisterPaymentProviders`. La désinstallation supprime tables (**y compris le journal de preuve et les
-rétractations**), configuration (`UCPBRIDGE_*`), inscriptions aux hooks, hook d'extension (s'il ne sert à aucun autre
-module) et bloc `.htaccess`.
+`actionUcpBridgeRegisterPaymentProviders`. La désinstallation supprime les tables de travail (sessions, idempotence,
+OAuth), la configuration (`UCPBRIDGE_*`), les inscriptions aux hooks, le hook d'extension (s'il ne sert à aucun autre
+module) et le bloc `.htaccess`. Elle **conserve par défaut** le journal de preuve (`ps_ucpbridge_proof`), les demandes
+de rétractation (`ps_ucpbridge_withdrawal`) et le journal des paiements (`ps_ucpbridge_payment`) : une réinstallation
+les retrouve tels quels. Pour les supprimer aussi, cocher dans la configuration « Supprimer aussi le journal de
+preuve... à la prochaine désinstallation » (après un export CSV). Ce choix est effacé avec la configuration : il ne
+vaut que pour la désinstallation qui suit.
 
 **Mise à jour** (à partir de la 0.1.2) : téléverser la nouvelle archive par le gestionnaire de modules, ou remplacer
 les fichiers puis lancer `php bin/console prestashop:module upgrade ucpbridge`, sans désinstaller. PrestaShop exécute
@@ -374,7 +379,15 @@ Modules > UCP Bridge pour PrestaShop (formulaire protégé par un jeton anti-CSR
   clé publiable, merchant_id de test ; l'URL de l'API Stripe est affichée, modifiable par script uniquement ;
 - clients OAuth : enregistrement par script (`UcpBridgeOAuth::registerClient`), secret haché en base ;
 - accès agents actifs (assistant, client, date de liaison, échéance), avec révocation ;
-- rapprochement des sessions bloquées (bouton, seuil en minutes), voir plus haut.
+- rapprochement des sessions bloquées (bouton, seuil en minutes), voir plus haut ;
+- journal de preuve et rétractations : nombre d'enregistrements, export CSV (bouton « Exporter les preuves et
+  rétractations », jeton anti-CSRF du module) ; option de suppression à la désinstallation (décochée par défaut).
+  Format du fichier `ucpbridge-preuves-AAAAMMJJ-HHMMSS.csv` : UTF-8 avec BOM, séparateur `;`, fins de ligne CRLF, une
+  ligne par commande (preuve et rétractation éventuelle) puis les rétractations sans preuve ; colonnes `id_commande`,
+  `reference_commande`, `date_preuve`, `session`, `agent_ucp`, `appelant`, `ip_appel_api`, `user_agent_appel_api`,
+  `version_cgv`, `acceptation_cgv`, `liens_legaux`, `mentions`, `totaux`, `consentements` (JSON tels qu'enregistrés),
+  `retractation_date`, `retractation_email`, `retractation_ip`, `retractation_accuse_envoye`. Une valeur qui
+  commencerait par `=`, `+`, `-` ou `@` est préfixée d'une apostrophe (pas de formule exécutée par le tableur).
 
 Les e-mails sont ceux de PrestaShop (Paramètres avancés > E-mail) : vérifier que l'envoi est actif.
 
@@ -426,7 +439,9 @@ python3 mcp_client.py   # client MCP minimal : « t-shirt colibri taille M » ju
   simultanés (aucun jeton survivant), processus arrêté après le débit ou après la commande puis rapprochement en ligne
   de commande, bouton de rapprochement, panier UCP figé après ouverture de son lien ; mise à jour depuis la 0.1.2
   publiée (`tests/test_11_mise_a_jour.py`) : données, configuration et jetons conservés, schéma identique à une
-  installation fraîche, script rejouable.
+  installation fraîche, script rejouable ; conservation des preuves (`tests/test_12_conserver_preuves.py`) :
+  désinstallation puis réinstallation sans perte, suppression sur choix explicite, export CSV (contenu, formule
+  neutralisée, téléchargement depuis le back-office, jeton refusé).
 
 ## Architecture
 
@@ -445,6 +460,7 @@ classes/UcpBridgeMcp.php      JSON-RPC 2.0 / MCP, traduit chaque outil vers la r
 classes/UcpBridgeLegal.php, UcpBridgeConsent.php, UcpBridgeTotals.php, UcpBridgeItemRef.php, UcpBridgeSigner.php,
 UcpBridgePkce.php             logique pure, couverte par les tests unitaires
 classes/UcpBridgeProof.php    tables du journal de preuve, des rétractations et des paiements (débits, remboursements)
+classes/UcpBridgeExport.php   export CSV des preuves et rétractations (configuration du module)
 classes/payment/              adaptateurs de paiement (interface, registre, mock, Stripe pour Google Pay)
 classes/UcpBridgeSchema.php   évolution du schéma en place (colonnes et configuration manquantes), mise à jour
 upgrade/upgrade-X.Y.Z.php     scripts de mise à jour lancés par PrestaShop (appellent Ucpbridge::upgradeInPlace)
