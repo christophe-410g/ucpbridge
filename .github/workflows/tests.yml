@@ -29,7 +29,7 @@ jobs:
         # 8.3 : minimum de PHPUnit 12 ; 8.5 : version de l'image prestashop/prestashop:9.1.5 du banc.
         php: ["8.3", "8.5"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -38,7 +38,7 @@ jobs:
           tools: none
 
       - name: Cache PHPUnit
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tools/phpunit.phar
           key: phpunit-${{ hashFiles('tools/get-phpunit.sh') }}
@@ -67,7 +67,7 @@ jobs:
 
       - name: Archive en artefact
         if: matrix.php == '8.5'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ucpbridge-zip
           path: dist/*.zip
@@ -84,11 +84,11 @@ jobs:
       FAUX_STRIPE_HOTE: 0.0.0.0
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/ms-playwright
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Cache des images docker du banc
         id: images
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/images.tar
           key: images-${{ hashFiles('docker-compose.yml') }}
@@ -106,7 +106,7 @@ jobs:
       - name: Démarrage du banc (installation de PrestaShop en arrière-plan)
         run: docker compose -p "$UCP_PROJECT" up -d mysql prestashop stripe-mock mailpit
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -117,7 +117,7 @@ jobs:
 
       - name: Cache des navigateurs Playwright
         id: navigateurs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('tests/requirements.txt') }}
@@ -131,12 +131,12 @@ jobs:
           fi
 
       # Node 22 pour l'inspecteur officiel MCP (npx), lancé par tests/test_03_mcp.py.
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
       - name: Cache npm (inspecteur MCP)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('tests/test_03_mcp.py') }}
@@ -162,7 +162,7 @@ jobs:
 
       - name: Artefact des journaux
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: journaux-integration
           path: test-logs/
