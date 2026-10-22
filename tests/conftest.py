@@ -57,6 +57,11 @@ def config(nom):
     return sql_val(f"SELECT value FROM ps_configuration WHERE name='{nom}' ORDER BY id_configuration DESC LIMIT 1")
 
 
+def cle_api(plateforme="default"):
+    """Clé API d'une plateforme (UCPBRIDGE_API_KEYS : une clé par plateforme)."""
+    return json.loads(config("UCPBRIDGE_API_KEYS") or "{}").get(plateforme, {}).get("key", "")
+
+
 def php(code):
     """Exécute du PHP dans le conteneur de la boutique, PrestaShop chargé."""
     script = "<?php define('_PS_ADMIN_DIR_', '/var/www/html/admin'); require '/var/www/html/config/config.inc.php';\n" + code
@@ -120,7 +125,7 @@ def somme_coherente(doc):
 class Boutique:
     def __init__(self):
         self.base = BASE
-        self.cle = config("UCPBRIDGE_API_KEY")
+        self.cle = cle_api()
         self.secret_mock = config("UCPBRIDGE_MOCK_SECRET")
         r = appel("GET", f"{BASE}/.well-known/ucp")
         assert r.code == 200, r.texte[:300]

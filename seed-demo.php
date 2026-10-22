@@ -99,7 +99,7 @@ Configuration::updateValue('PS_MAIL_TYPE', 3);
 // Suisse active (hors Union européenne) : la mention de rétractation ne doit pas s'y afficher.
 Db::getInstance()->update('country', ['active' => 1], 'iso_code = \'CH\'');
 Configuration::updateValue('UCPBRIDGE_MOCK_SECRET', 'simulation-contrib-2026');
-echo "Clé API : " . Configuration::get('UCPBRIDGE_API_KEY') . "\n";
+echo "Clé API (plateforme par défaut) : " . (UcpBridgeApiKeys::all()[UcpBridgeApiKeys::DEFAULT_ID]['key'] ?? '(aucune)') . "\n";
 
 // ---------- Règles panier de démonstration (codes promo UCP) ----------
 foreach (Db::getInstance()->executeS('SELECT r.id_cart_rule FROM ' . _DB_PREFIX_ . 'cart_rule r JOIN ' . _DB_PREFIX_ . 'cart_rule_lang l

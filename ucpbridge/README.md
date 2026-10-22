@@ -163,7 +163,11 @@ enregistrée avec l'URL par défaut, vers le conteneur stripe-mock sur le banc. 
   le **jeton client est prioritaire** et se reconnaît à son préfixe (`ucpat_`). Il authentifie à la fois l'acheteur et
   la plateforme (le client OAuth qui l'a obtenu). La plateforme peut joindre sa clé API en `X-UCP-Api-Key` ; si elle
   est présente, elle est vérifiée. Sans jeton client, `Authorization: Bearer <clé API ucpk_...>` ouvre la caisse en
-  invité. Jeton client invalide, expiré ou révoqué : `401 identity_required` avec
+  invité. **Une clé API par plateforme** (configuration du module, `UCPBRIDGE_API_KEYS`) : l'identifiant de la
+  plateforme fait partie de l'identité de l'appelant, donc chaque plateforme ne voit que ses propres paniers, sessions
+  de caisse et commandes, et ses `Idempotency-Key` ne rejouent jamais la réponse d'une autre. Ne jamais remettre la
+  même clé à deux plateformes : elles partageraient tout. La clé unique des versions 0.1.2 et antérieures
+  (`UCPBRIDGE_API_KEY`) devient automatiquement la plateforme `default`, sans perte des sessions en cours. Jeton client invalide, expiré ou révoqué : `401 identity_required` avec
   `WWW-Authenticate: Bearer realm=..., error="invalid_token"` ; scope manquant : `403 insufficient_scope`.
   En production, la clé API serait remplacée par les signatures HTTP (RFC 9421) de la plateforme.
 - **Commande** `GET /orders/{id}` (identifiant opaque `ord_...`, commandes passées via UCP par le même appelant
@@ -338,7 +342,7 @@ su www-data -s /bin/sh -c "php bin/console prestashop:module install ucpbridge"
 rm -rf var/cache/*
 ```
 
-À l'installation, le module génère la clé API (`ucpk_...`) et le secret HMAC des liens signés ; aucun secret,
+À l'installation, le module génère la clé API de la plateforme par défaut (`ucpk_...`) et le secret HMAC des liens signés ; aucun secret,
 mot de passe ni clé n'est livré dans le code. Il crée ses tables (`ps_ucpbridge_*`), ses hooks et le hook d'extension
 `actionUcpBridgeRegisterPaymentProviders`. La désinstallation supprime tables (**y compris le journal de preuve et les
 rétractations**), configuration (`UCPBRIDGE_*`), inscriptions aux hooks, hook d'extension (s'il ne sert à aucun autre
@@ -353,7 +357,8 @@ PrestaShop ne sert pas `/.well-known/`. Apache uniquement ; sous nginx, réécri
 
 Modules > UCP Bridge pour PrestaShop (formulaire protégé par un jeton anti-CSRF propre au module) :
 
-- clé API (affichage, régénération) ;
+- plateformes et clés API : une clé par plateforme (identifiant, nom affiché), ajout, régénération (même identité,
+  sessions conservées) et suppression (clé refusée aussitôt) ;
 - pages CMS des quatre liens légaux, option « relecture des CGV chez le marchand » ;
 - secret de simulation du paiement de test (vide = gestionnaire de test désactivé) ;
 - Google Pay TEST : clé Stripe de test `sk_test_` (champ masqué, jamais réaffichée ; vide = inchangée, `-` = effacée),
