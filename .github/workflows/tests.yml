@@ -154,7 +154,7 @@ jobs:
           docker compose -p "$UCP_PROJECT" ps -a > test-logs/docker-ps.txt 2>&1 || true
           docker compose -p "$UCP_PROJECT" logs --no-color --timestamps > test-logs/docker.log 2>&1 || true
           docker cp "$UCP_PROJECT-prestashop-1:/var/www/html/var/logs" test-logs/prestashop-var-logs 2>/dev/null || true
-          mkdir -p test-logs/captures && cp capture-*.png test-logs/captures/ 2>/dev/null || true
+          mkdir -p test-logs/captures && cp capture-*.png mcp-*-sortie.txt test-logs/captures/ 2>/dev/null || true
           for f in install unit integration; do
             [ -f "test-logs/$f.log" ] && { echo "::group::test-logs/$f.log"; tail -n 200 "test-logs/$f.log"; echo "::endgroup::"; }
           done
