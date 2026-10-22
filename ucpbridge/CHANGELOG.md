@@ -15,7 +15,9 @@ Nouveautés
   0.1.3 identiques : les corrections #1 à #4 n'ajoutent que des clés au JSON `payload` des sessions
   (`charge_attempt`, `charge_unknown`), lues avec une valeur par défaut. Configuration : la clé unique
   `UCPBRIDGE_API_KEY` (#5) est migrée vers la plateforme `default` de `UCPBRIDGE_API_KEYS` en tête de la mise à jour,
-  avant la création des clés manquantes (sinon une clé neuve aurait pris sa place). Version du module : 0.1.3.
+  avant la création des clés manquantes (sinon une clé neuve aurait pris sa place). L'ancienne clé n'est supprimée
+  qu'après l'enregistrement réussi de la nouvelle liste (`UcpBridgeApiKeys::migrateLegacy()`) : si l'écriture échoue,
+  elle reste acceptée et la mise à jour échoue au lieu de couper la plateforme en place. Version du module : 0.1.3.
 
 Corrections
 
